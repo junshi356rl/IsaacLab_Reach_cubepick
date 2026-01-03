@@ -33,14 +33,11 @@ import isaaclab.sim.schemas
 ##
 
 ENV_SPACING = 2.5
-
+CUBE_SIZE = 0.05
 def get_random_translation():
-    x = random.uniform(0.5, 0.8)
+    x = random.uniform(0.35, 0.7)
     y = random.uniform(0.1, 0.2)
-    z = 0
-    # randomly assign negative sign
-    if random.random() < 0.5:
-        x = -x
+    z = CUBE_SIZE/2 + 0.001  # Slightly above the ground to avoid initial penetration
     if random.random() < 0.5:
         y = -y
 
@@ -55,7 +52,7 @@ class ReachcubepickSceneCfg(InteractiveSceneCfg):
     cube = RigidObjectCfg(
         prim_path="{ENV_REGEX_NS}/Cube",
         spawn=CuboidCfg(
-            size=(0.05, 0.05, 0.05),
+            size=(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE),
             mass_props=sim_utils.schemas.MassPropertiesCfg(mass=0.1),
             rigid_props=sim_utils.schemas.RigidBodyPropertiesCfg(),
             collision_props=sim_utils.CollisionPropertiesCfg()
@@ -78,6 +75,17 @@ class ObservationsCfg:
         # pose_command = ObsTerm(func=mdp.generated_commands, params={"command_name": "ee_pose"})
         actions = ObsTerm(func=mdp.last_action)
         cube_pos = ObsTerm(func=mdp.root_pos_w, params={"asset_cfg": SceneEntityCfg("cube")})
+        lift_target_command = ObsTerm(func=mdp.generated_commands, params={"command_name": "lift_target"})
+        ee_rel_cube_pos = ObsTerm(
+            func=mdp.position_target_asset_error_vector,
+            params={
+                "asset_cfg": SceneEntityCfg("robot", body_names=["ee_link"]),
+                "target_asset_cfg": SceneEntityCfg("cube"),
+            },
+            noise=Unoise(n_min=-0.01, n_max=0.01)
+        )
+
+        
         def __post_init__(self):
             self.enable_corruption = True
             self.concatenate_terms = True
@@ -96,22 +104,39 @@ class ActionsCfg:
     )
 
 
-# @configclass
-# class CommandsCfg:
-#     ee_pose = mdp.UniformPoseCommandCfg(
-#         asset_name="robot",
-#         body_name="ee_link",
-#         resampling_time_range=(4.0, 4.0),
-#         debug_vis=True,
-#         ranges=mdp.UniformPoseCommandCfg.Ranges(
-#             pos_x=(0.35, 0.65),
-#             pos_y=(-0.2, 0.2),
-#             pos_z=(0.15, 0.5),
-#             roll=(0.0, 0.0),
-#             pitch=(math.pi / 2, math.pi / 2),
-#             yaw=(-3.14, 3.14),
-#         ),
-#     )
+@configclass
+class CommandsCfg:
+    # ee_pose = mdp.UniformPoseCommandCfg(
+    #     asset_name="robot",
+    #     body_name="ee_link",
+    #     resampling_time_range=(4.0, 4.0),
+    #     debug_vis=True,
+    #     ranges=mdp.UniformPoseCommandCfg.Ranges(
+    #         pos_x=(0.35, 0.65),
+    #         pos_y=(-0.2, 0.2),
+    #         pos_z=(0.15, 0.5),
+    #         roll=(0.0, 0.0),
+    #         pitch=(math.pi / 2, math.pi / 2),
+    #         yaw=(-3.14, 3.14),
+    #     ),
+    # )
+
+    lift_target = mdp.UniformPoseCommandCfg(
+        asset_name="robot", # target is based on the robot root
+        body_name="base_link",
+        resampling_time_range=(4.0, 4.0),
+        debug_vis=True,
+        ranges=mdp.UniformPoseCommandCfg.Ranges(
+            pos_x=(0.4, 0.7),
+            pos_y=(-0.2, 0.2),
+            pos_z=(0.2, 0.5),
+            roll=(0.0, 0.0),
+            pitch=(0.0, 0.0),
+            yaw=(0.0, 0.0),
+        ),
+    )
+
+
 
 @configclass
 class RewardsCfg:
@@ -132,19 +157,33 @@ class RewardsCfg:
     #     weight=0.1,
     #     params={"asset_cfg": SceneEntityCfg("robot", body_names=["ee_link"]), "std": 0.1, "command_name": "ee_pose"},
     # )
-    # For moving the gripper to the cube pos
-    end_effector_to_cube_position_tracking = RewTerm(
+
+    # # For moving the gripper to the cube pos
+    # end_effector_to_cube_position_tracking = RewTerm(
+    #     func=mdp.position_target_asset_error,
+    #     weight=-1.0,
+    #     params={"asset_cfg": SceneEntityCfg("robot", body_names=["ee_link"]), "target_asset_cfg": SceneEntityCfg("cube")},
+    # )
+
+    # For lifting the cube to the command pos
+    cube_position_tracking = RewTerm(
+        func=mdp.position_command_error,
+        weight=-0.2,
+        params={"asset_cfg": SceneEntityCfg("cube"), "command_name": "lift_target"},
+    )
+
+    end_effector_cube_position_tracking = RewTerm(
         func=mdp.position_target_asset_error,
-        weight=-1.0,
+        weight=-0.2,
         params={"asset_cfg": SceneEntityCfg("robot", body_names=["ee_link"]), "target_asset_cfg": SceneEntityCfg("cube")},
     )
 
-    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.0001)
-    joint_vel = RewTerm(
-        func=mdp.joint_vel_l2,
-        weight=-0.0001,
-        params={"asset_cfg": SceneEntityCfg("robot")},
-    )
+    # action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.0001)
+    # joint_vel = RewTerm(
+    #     func=mdp.joint_vel_l2,
+    #     weight=-0.0001,
+    #     params={"asset_cfg": SceneEntityCfg("robot")},
+    # )
 
 @configclass
 class TerminationsCfg:
@@ -162,18 +201,32 @@ class EventCfg:
         },
     )
 
+    reset_cube_position = EventTerm(
+        func=mdp.reset_root_state_uniform,
+        mode="reset",
+        params={
+            "pose_range": {
+                "x": (0.35, 0.7),
+                "y": (-0.1, 0.2),
+                "z": (CUBE_SIZE/2 + 0.001, CUBE_SIZE/2 + 0.001),  # Slightly above the ground to avoid initial penetration
+            },
+            'velocity_range': {"x": (0.0, 0.0), "y": (0.0, 0.0), "z": (0.0, 0.0)},
+            "asset_cfg": SceneEntityCfg("cube"),
+        },
+    )
+
 
 @configclass
 class CurriculumCfg:
     """Curriculum terms for the MDP"""
 
-    action_rate = CurrTerm(
-        func=mdp.modify_reward_weight, params={"term_name": "action_rate", "weight": -0.005, "num_steps": 4500}
-    )
+    # action_rate = CurrTerm(
+    #     func=mdp.modify_reward_weight, params={"term_name": "action_rate", "weight": -0.005, "num_steps": 4500}
+    # )
 
-    joint_vel = CurrTerm(
-        func=mdp.modify_reward_weight, params={"term_name": "joint_vel", "weight": -0.001, "num_steps": 4500}
-    )
+    # joint_vel = CurrTerm(
+    #     func=mdp.modify_reward_weight, params={"term_name": "joint_vel", "weight": -0.001, "num_steps": 4500}
+    # )
 
 
 
@@ -188,7 +241,7 @@ class ReachcubepickEnvCfg(ManagerBasedRLEnvCfg):
     scene: ReachcubepickSceneCfg = ReachcubepickSceneCfg(num_envs=2000, env_spacing=ENV_SPACING)
     observations = ObservationsCfg()
     actions = ActionsCfg()
-    # commands: CommandsCfg = CommandsCfg()
+    commands: CommandsCfg = CommandsCfg()
     rewards = RewardsCfg()
     terminations = TerminationsCfg()
     events = EventCfg()

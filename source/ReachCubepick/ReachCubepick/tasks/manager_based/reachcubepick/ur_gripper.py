@@ -15,14 +15,16 @@ import sys
 import os
 from os import path
 
-UR_PATH = os.path.abspath(os.path.join(os.path.abspath(__file__),'../../../../../../../',"assets/UR-with-gripper.usd"))
+FILE_NAME = "assets/UR-with-gripper.usd"
+# FILE_NAME = "assets/UR-with-gripper_from_course.usd"
+UR_PATH = os.path.abspath(os.path.join(os.path.abspath(__file__),'../../../../../../../', FILE_NAME))
 UR_GRIPPER_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
         usd_path=UR_PATH,
         activate_contact_sensors=False,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             rigid_body_enabled=True,
-            max_linear_velocity=1000.0,
+            max_linear_velocity=10.0,
             max_angular_velocity=1000.0,
             max_depenetration_velocity=5.0,
         ),
@@ -69,6 +71,7 @@ UR_GRIPPER_CFG = ArticulationCfg(
                 # "right_inner_finger_pad_joint",
                 # "left_inner_finger_pad_joint",
             ],
+            effort_limit_sim=200.0,
             stiffness=280,
             damping=28,
         ),

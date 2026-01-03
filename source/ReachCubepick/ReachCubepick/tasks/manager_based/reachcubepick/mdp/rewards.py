@@ -32,8 +32,12 @@ def position_command_error(env: ManagerBasedRLEnv, command_name: str, asset_cfg:
     command = env.command_manager.get_command(command_name)
     des_pos_b = command[:, :3]
     des_pos_w, _ = combine_frame_transforms(asset.data.root_state_w[:, :3], asset.data.root_state_w[:, 3:7], des_pos_b)
-    curr_pos_w = asset.data.body_state_w[:, asset_cfg.body_ids[0], :3] # type: ignore
-    return torch.norm(curr_pos_w - des_pos_w, dim=1)
+    if hasattr(asset_cfg, 'body_ids') and asset_cfg.body_ids is not None and asset_cfg.body_ids.start is not None:
+        curr_pos_w = asset.data.body_state_w[:, asset_cfg.body_ids[0], :3] # type: ignore
+    else:
+        curr_pos_w = asset.data.body_state_w[:, [0], :3].squeeze() # type: ignore
+    pos_error = curr_pos_w - des_pos_w
+    return torch.norm(pos_error, dim=1)
 
 def position_command_error_tanh(
     env: ManagerBasedRLEnv, std: float, command_name: str, asset_cfg: SceneEntityCfg
