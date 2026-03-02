@@ -5,7 +5,6 @@
 
 import math
 import random
-
 import isaaclab.sim as sim_utils
 import isaaclab.assets
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg, RigidObjectCfg
@@ -23,25 +22,48 @@ from isaaclab.managers import (
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.utils import configclass
 from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
+from isaaclab.sensors import ContactSensorCfg
 from isaaclab.sim.spawners.from_files.from_files_cfg import GroundPlaneCfg
 from isaaclab.sim.spawners.shapes import CuboidCfg
+from isaaclab.sim.spawners.materials import PhysicsMaterialCfg,RigidBodyMaterialCfg
+import torch
+
 from . import mdp
-from .ur_gripper import UR_GRIPPER_CFG
+from ....helpers.robotiq_fingertip_center_helper import get_left_right_fingertip_gap
+
+from .ur_gripper import UR_GRIPPER_CFG, UR_PATH, BASE_LINK_NAME, EE_LINK_NAME
 import isaaclab.sim.schemas
+import carb.settings
+from pxr import Usd
+
+def get_random_translation():
+    x = random.uniform(0.3, 0.6)
+    y = random.uniform(0.1, 0.2)
+    z = CUBE_LEGNTH/2 + 0.001  # Slightly above the ground to avoid initial penetration
+    if random.random() < 0.5:
+        y = -y
+
+    return (x, y, z)
+
+def read_meters_per_unit_from_usd(file_path: str) -> float:
+    stage = Usd.Stage.Open(file_path)
+    scale = stage.GetMetadata('metersPerUnit')
+    return scale if scale is not None else 1.0
+
 ##
 # Scene definition
 ##
 
 ENV_SPACING = 2.5
-CUBE_SIZE = 0.05
-def get_random_translation():
-    x = random.uniform(0.35, 0.7)
-    y = random.uniform(0.1, 0.2)
-    z = CUBE_SIZE/2 + 0.001  # Slightly above the ground to avoid initial penetration
-    if random.random() < 0.5:
-        y = -y
-
-    return (x, y, z)
+CUBE_LEGNTH = 0.08
+DIST_TOLERANCE = CUBE_LEGNTH/5
+GRASP_TOLERANCE = CUBE_LEGNTH/10
+CUBE_MASS = 0.5
+unit_scale = read_meters_per_unit_from_usd(UR_PATH)
+INNER_FINGER_SIZE = [unit_scale*0.0655, 0, 0] # https://blog.robotiq.com/hubfs/support-files/2F-85_2F-140_UR_PDF_20240402.pdf
+MIN_FINGER_GAP = 0.01
+MAX_FINGER_GAP = 0.14
+EPISODE_LENGTH_S = 6.0
 
 @configclass
 class ReachcubepickSceneCfg(InteractiveSceneCfg):
@@ -52,13 +74,23 @@ class ReachcubepickSceneCfg(InteractiveSceneCfg):
     cube = RigidObjectCfg(
         prim_path="{ENV_REGEX_NS}/Cube",
         spawn=CuboidCfg(
-            size=(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE),
-            mass_props=sim_utils.schemas.MassPropertiesCfg(mass=0.1),
+            size=(CUBE_LEGNTH, CUBE_LEGNTH, CUBE_LEGNTH),
+            mass_props=sim_utils.schemas.MassPropertiesCfg(mass=CUBE_MASS),
             rigid_props=sim_utils.schemas.RigidBodyPropertiesCfg(),
-            collision_props=sim_utils.CollisionPropertiesCfg()
+            collision_props=sim_utils.CollisionPropertiesCfg(),
+            physics_material = RigidBodyMaterialCfg(
+                static_friction = 0.8,
+                dynamic_friction = 0.7,
+                restitution = 0.1),
         ),
-        init_state = RigidObjectCfg.InitialStateCfg(pos=get_random_translation())
+        init_state = RigidObjectCfg.InitialStateCfg(pos=get_random_translation()),
     )
+    # finger_contact_sensor = ContactSensorCfg(
+    #     prim_path="{ENV_REGEX_NS}/Robot/ee_link/left_inner_finger",
+    #     update_period=0.01,
+    #     history_length=3,
+    #     filter_prim_paths_expr=["{ENV_REGEX_NS}/Cube"]
+    # )
 
 ##
 # MDP settings
@@ -69,23 +101,31 @@ class ObservationsCfg:
 
     @configclass
     class PolicyCfg(ObsGroup):
-        joint_pos = ObsTerm(func=mdp.joint_pos_rel, noise=Unoise(n_min=-0.01, n_max=0.01))
-        joint_vel = ObsTerm(func=mdp.joint_vel_rel, noise=Unoise(n_min=-0.01, n_max=0.01))
-        # For moving the gripper to the cube pos, we needn't a pose command
-        # pose_command = ObsTerm(func=mdp.generated_commands, params={"command_name": "ee_pose"})
-        actions = ObsTerm(func=mdp.last_action)
-        cube_pos = ObsTerm(func=mdp.root_pos_w, params={"asset_cfg": SceneEntityCfg("cube")})
-        lift_target_command = ObsTerm(func=mdp.generated_commands, params={"command_name": "lift_target"})
-        ee_rel_cube_pos = ObsTerm(
-            func=mdp.position_target_asset_error_vector,
-            params={
-                "asset_cfg": SceneEntityCfg("robot", body_names=["ee_link"]),
-                "target_asset_cfg": SceneEntityCfg("cube"),
-            },
-            noise=Unoise(n_min=-0.01, n_max=0.01)
-        )
+        # Robot observations
+        joint_pos = ObsTerm(func=mdp.joint_pos_rel)
+        joint_vel = ObsTerm(func=mdp.joint_vel_rel)
 
+        # Action and Command
+        actions = ObsTerm(func=mdp.last_action)
         
+        # Cube observations
+        cube_pos = ObsTerm(func=mdp.root_pos_w, params={"asset_cfg": SceneEntityCfg("cube")}) # TODO: should use pos relative to robot base
+        cube_quat = ObsTerm(func=mdp.root_quat_w, params={"asset_cfg": SceneEntityCfg("cube")})
+
+        ee_pos = ObsTerm(func=mdp.body_pose_w, params={"asset_cfg": SceneEntityCfg("robot", body_names=[EE_LINK_NAME])})
+        # fingertip_gap = ObsTerm(func=get_left_right_fingertip_gap)
+        finger_gap_native = ObsTerm(func=mdp.inner_finger_gap_native, params={
+            "left_finger_cfg": SceneEntityCfg("robot", body_names=["left_inner_finger"]),
+            "right_finger_cfg": SceneEntityCfg("robot", body_names=["right_inner_finger"]),
+        })
+        # cube_fingertip_mid_diff = ObsTerm(func=mdp.fingertip_midpoint_to_target_vector, params={
+        #     "target_asset_cfg": SceneEntityCfg("cube")})
+        finger_to_cube_native = ObsTerm(func=mdp.inner_finger_midpoint_to_target_native, params={
+            "left_finger_cfg": SceneEntityCfg("robot", body_names=["left_inner_finger"]),
+            "right_finger_cfg": SceneEntityCfg("robot", body_names=["right_inner_finger"]),
+            "target_asset_cfg": SceneEntityCfg("cube")
+        })
+        # move_target_command = ObsTerm(func=mdp.generated_commands, params={"command_name": "move_target"})
         def __post_init__(self):
             self.enable_corruption = True
             self.concatenate_terms = True
@@ -102,92 +142,156 @@ class ActionsCfg:
         use_default_offset=True,
         debug_vis=True
     )
-
+    gripper_action: ActionTerm = mdp.JointPositionActionCfg(
+        asset_name="robot",
+        joint_names=["finger_joint"],
+        scale=1,
+        use_default_offset=True,
+        debug_vis=True
+    )
 
 @configclass
 class CommandsCfg:
-    # ee_pose = mdp.UniformPoseCommandCfg(
-    #     asset_name="robot",
-    #     body_name="ee_link",
-    #     resampling_time_range=(4.0, 4.0),
-    #     debug_vis=True,
-    #     ranges=mdp.UniformPoseCommandCfg.Ranges(
-    #         pos_x=(0.35, 0.65),
-    #         pos_y=(-0.2, 0.2),
-    #         pos_z=(0.15, 0.5),
-    #         roll=(0.0, 0.0),
-    #         pitch=(math.pi / 2, math.pi / 2),
-    #         yaw=(-3.14, 3.14),
-    #     ),
-    # )
-
-    lift_target = mdp.UniformPoseCommandCfg(
+    move_target = mdp.UniformPoseCommandCfg(
         asset_name="robot", # target is based on the robot root
-        body_name="base_link",
-        resampling_time_range=(4.0, 4.0),
+        body_name=BASE_LINK_NAME,
+        resampling_time_range=(EPISODE_LENGTH_S, EPISODE_LENGTH_S),
         debug_vis=True,
         ranges=mdp.UniformPoseCommandCfg.Ranges(
             pos_x=(0.4, 0.7),
             pos_y=(-0.2, 0.2),
-            pos_z=(0.2, 0.5),
+            pos_z=(0, 0),
             roll=(0.0, 0.0),
             pitch=(0.0, 0.0),
             yaw=(0.0, 0.0),
         ),
     )
 
-
-
 @configclass
 class RewardsCfg:
-    # For moving the gripper to arbitrary position in the env
-    # end_effector_orientation_tracking = RewTerm(
-    #     func=mdp.orientation_command_error,
-    #     weight=-0.1,
-    #     params={"asset_cfg": SceneEntityCfg("robot", body_names=["ee_link"]), "command_name": "ee_pose"},
+    # gripper_cube_dist_reward = RewTerm(
+    #     func=mdp.gripper_target_dist_reward,
+    #     weight=3.0,
+    #     params={
+    #         'std_dist': 0.15,
+    #         'target_asset_cfg': SceneEntityCfg("cube"),
+    #     }
     # )
+    gripper_cube_dist_reward_native = RewTerm(
+        func=mdp.native_finger_midpoint_to_target_distance_reward,
+        weight=3.0,
+        params={
+            'std_dist': 0.15,
+            'left_finger_cfg': SceneEntityCfg("robot", body_names=["left_inner_finger"]),
+            'right_finger_cfg': SceneEntityCfg("robot", body_names=["right_inner_finger"]),
+            'target_asset_cfg': SceneEntityCfg("cube"),
+        }
+    )
 
-    # end_effector_position_tracking = RewTerm(
-    #     func=mdp.position_command_error,
-    #     weight=-0.2,
-    #     params={"asset_cfg": SceneEntityCfg("robot", body_names=["ee_link"]), "command_name": "ee_pose"},
+    finger_grasp_reward_native = RewTerm(
+        func=mdp.native_finger_grasp_reward,
+        weight=3.0,
+        params={
+            'std_dist': 0.15,
+            'left_finger_cfg': SceneEntityCfg("robot", body_names=["left_inner_finger"]),
+            'right_finger_cfg': SceneEntityCfg("robot", body_names=["right_inner_finger"]),
+            'target_asset_cfg': SceneEntityCfg("cube"),
+        }
+    )
+
+    finger_gap_reward_native = RewTerm(
+        func=mdp.native_finger_gap_reward,
+        weight=3.0,
+        params={
+            'cube_length': CUBE_LEGNTH,
+            'std_dist': 0.15,
+            'left_finger_cfg': SceneEntityCfg("robot", body_names=["left_inner_finger"]),
+            'right_finger_cfg': SceneEntityCfg("robot", body_names=["right_inner_finger"]),
+            'target_asset_cfg': SceneEntityCfg("cube"),
+        }
+    )
+
+
+    # gripper_grasp_cube_reward = RewTerm(
+    #     func=mdp.gripper_grasp_cube_reward,
+    #     weight=0.5,
+    #     params={
+    #         'std_dist': 0.15,
+    #         'std_grasp': 0.03,
+    #         'target_asset_cfg': SceneEntityCfg("cube"),
+    #         'dist_tolerance': DIST_TOLERANCE,
+    #         'grasp_success_threshold': 0.2,
+    #         'grasp_success_reward': 50.0,
+    #     }
     # )
-    # end_effector_position_tracking_fine_grained = RewTerm(
+    # finger_gap_reward = RewTerm(
+    #     func=mdp.finger_gap_reward,
+    #     weight=1.0,
+    #     params={
+    #         'cube_length': CUBE_LEGNTH,
+    #         'gap_far_offset': 0.06,
+    #         'gap_near_offset': -0.005, 
+    #         'gap_std': 0.03,
+    #         'dist_far': 0.20,
+    #         'dist_near': 0.05,
+    #     }
+    # )
+    # cube_move_position_tracking_tanh_sensor_activated = RewTerm(
     #     func=mdp.position_command_error_tanh,
-    #     weight=0.1,
-    #     params={"asset_cfg": SceneEntityCfg("robot", body_names=["ee_link"]), "std": 0.1, "command_name": "ee_pose"},
+    #     weight=5,
+    #     params={"std": 0.2,
+    #             "asset_cfg": SceneEntityCfg("cube"),
+    #             "command_name": "move_target"}
     # )
 
-    # # For moving the gripper to the cube pos
-    # end_effector_to_cube_position_tracking = RewTerm(
-    #     func=mdp.position_target_asset_error,
-    #     weight=-1.0,
-    #     params={"asset_cfg": SceneEntityCfg("robot", body_names=["ee_link"]), "target_asset_cfg": SceneEntityCfg("cube")},
+    # contact_grasp_reward = RewTerm(
+    #     func=mdp.contact_grasp_reward,
+    #     weight=0.5, 
+    #     params={
+    #         'force_scale': 5.0
+    #     }
     # )
 
-    # For lifting the cube to the command pos
-    cube_position_tracking = RewTerm(
-        func=mdp.position_command_error,
-        weight=-0.2,
-        params={"asset_cfg": SceneEntityCfg("cube"), "command_name": "lift_target"},
+    action_rate = RewTerm(
+        func=mdp.action_rate_l2, 
+        weight=-0.001
     )
-
-    end_effector_cube_position_tracking = RewTerm(
-        func=mdp.position_target_asset_error,
-        weight=-0.2,
-        params={"asset_cfg": SceneEntityCfg("robot", body_names=["ee_link"]), "target_asset_cfg": SceneEntityCfg("cube")},
+    joint_vel = RewTerm(
+        func=mdp.joint_vel_l2,
+        weight=-0.01,
+        params={
+            "asset_cfg": SceneEntityCfg("robot",
+                                        joint_ids=[0, 1, 2, 3, 4, 5, 6])}, # exclude mimic joints
     )
-
-    # action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.0001)
-    # joint_vel = RewTerm(
+    # joint_vel_gripper = RewTerm(
     #     func=mdp.joint_vel_l2,
-    #     weight=-0.0001,
-    #     params={"asset_cfg": SceneEntityCfg("robot")},
+    #     weight=-1.0,
+    #     params={
+    #         "asset_cfg": SceneEntityCfg("robot", joint_ids=[6, 7, 8, 9, 10, 11])
+    #     },
     # )
+    termination_penalty = RewTerm(
+        func=mdp.is_terminated,
+        weight=-1.0,
+    )
+
+
+def joint_vel_too_high(env, threshold: float, asset_cfg: SceneEntityCfg):
+    """Termination if any joint velocity exceeds the threshold."""
+    asset = env.scene[asset_cfg.name]
+    joint_vels = asset.data.joint_vel[:, asset_cfg.joint_ids]
+    return torch.any(torch.abs(joint_vels) > threshold, dim=1)
 
 @configclass
 class TerminationsCfg:
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
+    joint_vel_limit = DoneTerm(
+        func=joint_vel_too_high, 
+        params={
+            "threshold": 10.0,
+            "asset_cfg": SceneEntityCfg("robot", joint_ids=[0, 1, 2, 3, 4, 5])
+        }
+    )
 
 
 @configclass
@@ -196,7 +300,7 @@ class EventCfg:
         func=mdp.reset_joints_by_scale,
         mode="reset",
         params={
-            "position_range": (0.75, 1.25),
+            "position_range": (0.8, 1.2),
             "velocity_range": (0.0, 0.0),
         },
     )
@@ -206,28 +310,52 @@ class EventCfg:
         mode="reset",
         params={
             "pose_range": {
-                "x": (0.35, 0.7),
-                "y": (-0.1, 0.2),
-                "z": (CUBE_SIZE/2 + 0.001, CUBE_SIZE/2 + 0.001),  # Slightly above the ground to avoid initial penetration
+                "x": (0.35, 0.5),
+                "y": (-0.2, 0.3),
+                "z": (CUBE_LEGNTH/2 + 0.001, CUBE_LEGNTH/2 + 0.001),  # Slightly above the ground to avoid initial penetration
             },
             'velocity_range': {"x": (0.0, 0.0), "y": (0.0, 0.0), "z": (0.0, 0.0)},
             "asset_cfg": SceneEntityCfg("cube"),
         },
     )
 
+# def override_param(env, env_ids, data, value, num_steps):
+#     cur_step = env.unwrapped.common_step_counter
+#     # find the first num_steps smaller than cur_step and get the corresponding value
+#     updated = False
+#     for idx, step in enumerate(num_steps):
+#         if cur_step >= step:
+#             new_value = value[idx]
+#             updated = True
+#         else:
+#             break
+#     if updated:
+#         return new_value
+#     return mdp.modify_term_cfg.NO_CHANGE
 
 @configclass
 class CurriculumCfg:
     """Curriculum terms for the MDP"""
-
     # action_rate = CurrTerm(
-    #     func=mdp.modify_reward_weight, params={"term_name": "action_rate", "weight": -0.005, "num_steps": 4500}
+    #     func=mdp.modify_reward_weight, params={"term_name": "action_rate", "weight": -0.005, "num_steps": 150000}
+    # )
+    # grasp_weight_increase = CurrTerm(
+    #     func=mdp.modify_reward_weight,
+    #     params={"term_name": "gripper_grasp_cube_reward", "weight": 1.5, "num_steps": 100000}
+    # )
+    # grasp_weight_final = CurrTerm(
+    #     func=mdp.modify_reward_weight,
+    #     params={"term_name": "gripper_grasp_cube_reward", "weight": 2.0, "num_steps": 300000}
     # )
 
-    # joint_vel = CurrTerm(
-    #     func=mdp.modify_reward_weight, params={"term_name": "joint_vel", "weight": -0.001, "num_steps": 4500}
+    # tighten_threshold = CurrTerm(
+    #     func=mdp.modify_term_cfg,
+    #     params={
+    #         "address": "rewards.gripper_grasp_cube_reward.params.grasp_success_threshold",
+    #         "modify_params": {"value": [0.4, 0.5], "num_steps": [200000, 300000]},
+    #         "modify_fn": override_param,
+    #     }
     # )
-
 
 
 ##
@@ -238,7 +366,7 @@ class CurriculumCfg:
 @configclass
 class ReachcubepickEnvCfg(ManagerBasedRLEnvCfg):
     # Scene settings
-    scene: ReachcubepickSceneCfg = ReachcubepickSceneCfg(num_envs=2000, env_spacing=ENV_SPACING)
+    scene: ReachcubepickSceneCfg = ReachcubepickSceneCfg(num_envs=1000, env_spacing=ENV_SPACING)
     observations = ObservationsCfg()
     actions = ActionsCfg()
     commands: CommandsCfg = CommandsCfg()
@@ -253,14 +381,14 @@ class ReachcubepickEnvCfg(ManagerBasedRLEnvCfg):
         # general settings
         self.decimation = 2
         self.sim.render_interval = self.decimation
-        self.episode_length_s = 3.0
+        self.episode_length_s = EPISODE_LENGTH_S
         self.viewer.eye = (3.5, 3.5, 3.5)
-        self.sim.dt = 1.0 / 60.0
+        self.sim.dt = 1.0 / 120.0
 
 @configclass
 class ReachcubepickEnvCfg_PLAY(ReachcubepickEnvCfg):
     def __post_init__(self):
         super().__post_init__()
-        self.scene.num_envs = 50
+        self.scene.num_envs = 5
         self.scene.env_spacing = 2.5
         self.observations.policy.enable_corruption = False

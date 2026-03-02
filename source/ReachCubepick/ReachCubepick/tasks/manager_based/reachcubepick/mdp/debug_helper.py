@@ -1,0 +1,102 @@
+import torch
+
+def debug_robot_state(
+    env, 
+    threshold_arm: float = 5.0,      
+    threshold_gripper: float = 2.0,  
+    report_top_k: int = 5,           
+    print_freq_stats: int = 1000    
+):
+
+    step_count = env.unwrapped.common_step_counter
+    robot = env.scene["robot"]
+    
+    joint_vels = robot.data.joint_vel  # (N, J)
+    joint_names = robot.joint_names
+    abs_vels = torch.abs(joint_vels)
+    
+    actions = env.action_manager.action
+    abs_actions = torch.abs(actions)
+    
+    arm_ids = [0, 1, 2, 3, 4, 5]
+    gripper_ids = [6, 7, 8, 9, 10, 11] 
+    
+    # Arm
+    arm_vels = abs_vels[:, arm_ids]
+    arm_max_vals, arm_max_indices = torch.max(arm_vels, dim=1) # (N,), (N,)
+    arm_violations = arm_max_vals > threshold_arm
+    
+    # Gripper
+    gripper_vels = abs_vels[:, gripper_ids]
+    gripper_max_vals, gripper_max_indices = torch.max(gripper_vels, dim=1)
+    gripper_violations = gripper_max_vals > threshold_gripper
+    
+    any_violation = arm_violations | gripper_violations
+    violation_count = int(torch.sum(any_violation).item())
+    
+    if step_count % print_freq_stats == 0:
+        print(f"[DEBUG STATS] Step {step_count}: "
+              f"Max Arm Vel={arm_max_vals.max():.2f}/{threshold_arm}, "
+              f"Max Grip Vel={gripper_max_vals.max():.2f}/{threshold_gripper}, "
+              f"Violations={violation_count}/{env.num_envs}")
+
+    if violation_count > 0:
+        violation_ids = torch.nonzero(any_violation, as_tuple=True)[0].cpu().tolist()
+        
+        ids_to_report = violation_ids[:report_top_k]
+        
+        print(f"\n{'='*20} [TERMINATION DEBUG] Step {step_count} {'='*20}")
+        print(f"Total Violating Envs: {violation_count} / {env.num_envs}")
+        print(f"Thresholds -> Arm: {threshold_arm} rad/s, Gripper: {threshold_gripper} rad/s")
+        
+        for i, env_id in enumerate(ids_to_report):
+            env_id = int(env_id)
+            reasons = []
+            
+            if arm_violations[env_id]:
+                idx_in_group = int(arm_max_indices[env_id])
+                global_idx = arm_ids[idx_in_group]
+                val = float(arm_max_vals[env_id])
+                name = joint_names[global_idx]
+                reasons.append(f"ARM:'{name}'(Idx:{global_idx})={val:.2f}")
+            
+            if gripper_violations[env_id]:
+                idx_in_group = int(gripper_max_indices[env_id])
+                global_idx = gripper_ids[idx_in_group]
+                val = float(gripper_max_vals[env_id])
+                name = joint_names[global_idx]
+                reasons.append(f"GRIP:'{name}'(Idx:{global_idx})={val:.2f}")
+            
+            max_act_val = float(torch.max(abs_actions[env_id]))
+            
+            context_info = ""
+            if env.scene["cube"] is not None:
+                cube = env.scene["cube"]
+                r_pos = robot.data.root_pos_w[env_id, :3]
+                c_pos = cube.data.root_pos_w[env_id, :3]
+                dist = float(torch.norm(r_pos - c_pos).item())
+                context_info = f"| Dist={dist:.3f}m | MaxAct={max_act_val:.2f}"
+            
+            print(f"  Env [{env_id:3d}]: " + " | ".join(reasons) + " " + context_info)
+            
+        if violation_count > report_top_k:
+            print(f"  ... and {violation_count - report_top_k} more environments hidden.")
+        
+        robot_pos_rel = robot.data.root_pos_w - env.scene.env_origins
+        cube_pos_rel = env.scene["cube"].data.root_pos_w - env.scene.env_origins
+        
+        r_dist = torch.norm(robot_pos_rel, dim=1)
+        c_dist = torch.norm(cube_pos_rel, dim=1) 
+        
+        explosion_mask = (r_dist > 5.0) | (c_dist > 5.0)
+        if explosion_mask.any():
+            exp_count = int(torch.sum(explosion_mask).item())
+            print(f"   CRITICAL: {exp_count} environments have exploded (Pos > 5m)!")
+            
+        print(f"{'='*62}\n")
+
+    mask_pos = (r_dist > 10) | (c_dist > 10)
+    if torch.any(mask_pos):
+        bad_ids = torch.nonzero(mask_pos, as_tuple=True)[0].cpu().tolist()[:3]
+        print(f"[CRITICAL] PHYSICS EXPLOSION at Step {step_count}! Envs: {bad_ids}")
+        print(f"  Max Robot Dist: {r_dist.max().item():.2f}m, Max Cube Dist: {c_dist.max().item():.2f}m")

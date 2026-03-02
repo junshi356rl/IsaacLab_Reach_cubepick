@@ -114,6 +114,12 @@ from isaaclab_tasks.utils import get_checkpoint_path
 from isaaclab_tasks.utils.hydra import hydra_task_config
 
 import ReachCubepick.tasks  # noqa: F401
+from ReachCubepick.debug_drawer import DebugDrawer
+from ReachCubepick.tasks.manager_based.reachcubepick.mdp.helper import get_finger_axis, get_to_target
+from isaaclab.managers import SceneEntityCfg
+from isaaclab.utils.math import normalize
+from ReachCubepick.helpers.robotiq_fingertip_center_helper import write_fingertip_offset_to_env, get_left_right_fingertip_midpoint_pos_w
+from pxr import Gf
 
 # config shortcuts
 if args_cli.agent is None:
@@ -196,6 +202,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
 
     # wrap around environment for skrl
     env = SkrlVecEnvWrapper(env, ml_framework=args_cli.ml_framework)  # same as: `wrap_env(env, wrapper="auto")`
+    # write_fingertip_offset_to_env(env)
 
     # configure and instantiate the skrl runner
     # https://skrl.readthedocs.io/en/latest/api/utils/runner.html
@@ -211,6 +218,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
 
     # reset environment
     obs, _ = env.reset()
+
+    debug_drawer = DebugDrawer()
     timestep = 0
     # simulate environment
     while simulation_app.is_running():
@@ -233,7 +242,36 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
             # exit the play loop after recording one video
             if timestep == args_cli.video_length:
                 break
-
+        
+        debug_drawer.clear()
+        left_finger_id = env.unwrapped.scene["robot"].find_bodies('left_inner_finger')[0][0]
+        left_finger_pos = env.unwrapped.scene.articulations["robot"].data.body_pos_w[:, left_finger_id, :3]
+        left_finger_pos_cpu = left_finger_pos[0:2,:].cpu().tolist()
+        # mid_point, to_target = get_to_target(
+        #     env.unwrapped,
+        #     left_finger_cfg=SceneEntityCfg(name="robot", body_names=["left_inner_finger"]),
+        #     right_finger_cfg=SceneEntityCfg(name="robot", body_names=["right_inner_finger"]),
+        #     target_asset_cfg=SceneEntityCfg(name="cube"),
+        # )
+        # debug_drawer.draw_line(
+        #     from_point=mid_point,
+        #     to_point=mid_point + to_target,
+        #     color=[(0.0, 0.0, 1.0, 1)],   # Blue
+        #     thickness=[1.0],
+        # )
+        # debug_drawer.draw_line(
+        #     from_point=left_finger_pos,
+        #     to_point=left_finger_pos + normalize(finger_axis),
+        #     color=[(1.0, 0.0, 0.0, 1)],   # Red
+        #     thickness=[1.0],
+        # )
+        # left_right_fingertip_midpoint_pos_w = get_left_right_fingertip_midpoint_pos_w(
+        #     env.unwrapped
+        # )
+        # left_right_fingertip_midpoint_env0_cpu = left_right_fingertip_midpoint_pos_w[0:2,:].cpu().tolist()
+        # finger_pos_draw = [Gf.Vec3f(*fp) for fp in left_right_fingertip_midpoint_env0_cpu]
+        finger_pos_draw = [Gf.Vec3f(*fp) for fp in left_finger_pos_cpu]
+        debug_drawer.draw.draw_points(finger_pos_draw, [(1.0, 0.0, 0.0, 1),(1.0, 0.0, 0.0, 1)], [5.0, 5.0])
         # time delay for real-time evaluation
         sleep_time = dt - (time.time() - start_time)
         if args_cli.real_time and sleep_time > 0:
