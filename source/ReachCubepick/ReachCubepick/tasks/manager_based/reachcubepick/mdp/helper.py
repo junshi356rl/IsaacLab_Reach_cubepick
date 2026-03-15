@@ -2,6 +2,7 @@ from __future__ import annotations
 import torch
 from typing import TYPE_CHECKING
 from isaaclab.utils.math import normalize
+from isaaclab.managers import SceneEntityCfg
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -89,3 +90,31 @@ def get_body_quat(env, asset_name, body_name):
     body_id = asset.find_bodies(body_name)[0]
     quat = asset.data.body_state_w[:, body_id, 3:7].squeeze()
     return quat
+
+def compute_cube_velocity_alignment(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg,
+    command_name: str,
+    eps: float = 1e-6
+) -> dict:
+    asset = env.scene[asset_cfg.name]
+    command = env.command_manager.get_command(command_name)
+    
+    des_pos_b = command[:, :3]
+    des_pos_w = env.scene.env_origins + des_pos_b
+    
+    curr_pos_w = asset.data.root_pos_w[:, :3]
+    
+    to_target = des_pos_w - curr_pos_w
+    to_target_dist = torch.norm(to_target, dim=1, keepdim=True) + eps
+    to_target_dir = to_target / to_target_dist
+    
+    cube_vel = asset.data.root_vel_w[:, :3]  # (N, 3)
+    cube_speed = torch.norm(cube_vel, dim=1, keepdim=True)  # (N, 1)
+    
+    vel_dir = cube_vel / (cube_speed + eps)  # (N, 3)
+    
+    alignment = torch.sum(to_target_dir * vel_dir, dim=1, keepdim=True)
+    
+    return (alignment, to_target_dir, vel_dir, cube_speed, cube_vel, to_target_dist)
+

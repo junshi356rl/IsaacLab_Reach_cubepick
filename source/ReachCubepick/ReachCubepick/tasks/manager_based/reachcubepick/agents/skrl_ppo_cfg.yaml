@@ -40,12 +40,12 @@ memory:
 # https://skrl.readthedocs.io/en/latest/api/agents/ppo.html
 agent:
   class: PPO
-  rollouts: 2000
+  rollouts: 1600
   batch_size: auto
   learning_epochs: 5
   discount_factor: 0.99
   lambda: 0.95
-  learning_rate: 1.0e-03
+  learning_rate: 3.0e-04  # updated from 1e-3 when grasping for avoid forgetting grasp
   learning_rate_scheduler: KLAdaptiveLR
   learning_rate_scheduler_kwargs:
     kl_threshold: 0.01
@@ -59,9 +59,9 @@ agent:
   ratio_clip: 0.2
   value_clip: 0.2
   clip_predicted_values: True
-  entropy_loss_scale: 0.05
+  entropy_loss_scale: 0.1 # updated from 0.05 when grasping for encourage learning to move cube
   value_loss_scale: 1.0
-  kl_threshold: 0.0
+  kl_threshold: 0 # updated from 0 for limit the policy update when the reward changes due to curriculum
   rewards_shaper_scale: 1.0
   time_limit_bootstrap: False
   # logging and checkpoint
@@ -76,5 +76,5 @@ agent:
 # https://skrl.readthedocs.io/en/latest/api/trainers/sequential.html
 trainer:
   class: SequentialTrainer
-  timesteps: 500000
+  timesteps: 1500000
   environment_info: log

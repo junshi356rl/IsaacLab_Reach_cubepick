@@ -9,8 +9,10 @@ def debug_robot_state(
 ):
 
     step_count = env.unwrapped.common_step_counter
-    robot = env.scene["robot"]
+    if step_count % print_freq_stats != 0:
+        return
     
+    robot = env.scene["robot"]
     joint_vels = robot.data.joint_vel  # (N, J)
     joint_names = robot.joint_names
     abs_vels = torch.abs(joint_vels)
@@ -34,18 +36,19 @@ def debug_robot_state(
     any_violation = arm_violations | gripper_violations
     violation_count = int(torch.sum(any_violation).item())
     
-    if step_count % print_freq_stats == 0:
-        print(f"[DEBUG STATS] Step {step_count}: "
-              f"Max Arm Vel={arm_max_vals.max():.2f}/{threshold_arm}, "
-              f"Max Grip Vel={gripper_max_vals.max():.2f}/{threshold_gripper}, "
-              f"Violations={violation_count}/{env.num_envs}")
+
+    print(f"{'='*62}\n")
+    print(f"[ROBOT STATE DEBUG STATS] Step {step_count}: "
+          f"Max Arm Vel={arm_max_vals.max():.2f}/{threshold_arm}, "
+          f"Max Grip Vel={gripper_max_vals.max():.2f}/{threshold_gripper}, "
+          f"Violations={violation_count}/{env.num_envs}")
 
     if violation_count > 0:
         violation_ids = torch.nonzero(any_violation, as_tuple=True)[0].cpu().tolist()
         
         ids_to_report = violation_ids[:report_top_k]
         
-        print(f"\n{'='*20} [TERMINATION DEBUG] Step {step_count} {'='*20}")
+        print(f"[TERMINATION DEBUG] Step {step_count}")
         print(f"Total Violating Envs: {violation_count} / {env.num_envs}")
         print(f"Thresholds -> Arm: {threshold_arm} rad/s, Gripper: {threshold_gripper} rad/s")
         
@@ -91,12 +94,27 @@ def debug_robot_state(
         explosion_mask = (r_dist > 5.0) | (c_dist > 5.0)
         if explosion_mask.any():
             exp_count = int(torch.sum(explosion_mask).item())
-            print(f"   CRITICAL: {exp_count} environments have exploded (Pos > 5m)!")
-            
-        print(f"{'='*62}\n")
+            print(f"   CRITICAL: {exp_count} environments have exploded (Pos > 5m)!")  
+        mask_pos = (r_dist > 10) | (c_dist > 10)
+        if torch.any(mask_pos):
+            bad_ids = torch.nonzero(mask_pos, as_tuple=True)[0].cpu().tolist()[:3]
+            print(f"[CRITICAL] PHYSICS EXPLOSION at Step {step_count}! Envs: {bad_ids}")
+            print(f"  Max Robot Dist: {r_dist.max().item():.2f}m, Max Cube Dist: {c_dist.max().item():.2f}m")
+    else:
+        print(f"[ROBOT STATE DEBUG STATS] Step {step_count}: No velocity violations detected. Max Arm Vel={arm_max_vals.max():.2f}, Max Grip Vel={gripper_max_vals.max():.2f}")
 
-    mask_pos = (r_dist > 10) | (c_dist > 10)
-    if torch.any(mask_pos):
-        bad_ids = torch.nonzero(mask_pos, as_tuple=True)[0].cpu().tolist()[:3]
-        print(f"[CRITICAL] PHYSICS EXPLOSION at Step {step_count}! Envs: {bad_ids}")
-        print(f"  Max Robot Dist: {r_dist.max().item():.2f}m, Max Cube Dist: {c_dist.max().item():.2f}m")
+
+def debug_cube_move_state(env, distance_tensor, distance_reward, print_freq_stats):
+    step_count = env.unwrapped.common_step_counter
+    # print mean and max of cube distance
+    if step_count % print_freq_stats == 0:
+        print(f"{'='*62}\n")
+        cube = env.scene["cube"]
+        cube_vel = cube.data.root_vel_w[:, :3]
+        mean_cube_vel = torch.norm(cube_vel, dim=1).mean().item()
+        max_cube_vel = torch.norm(cube_vel, dim=1).max().item()
+        print(f"[CUBE MOVE DEBUG STATS] Step {step_count}: Cube Vel -> Mean: {mean_cube_vel:.3f}m/s, Max: {max_cube_vel:.3f}/s")
+        mean_dist = distance_tensor.mean().item()
+        max_dist = distance_tensor.max().item()
+        distance_reward_mean = distance_reward.mean().item()
+        print(f"[CUBE MOVE DEBUG STATS] Step {step_count}: Cube Dist -> Mean: {mean_dist:.3f}m, Max: {max_dist:.3f}m | Reward -> {distance_reward_mean}")

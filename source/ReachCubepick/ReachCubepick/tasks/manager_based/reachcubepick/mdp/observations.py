@@ -4,7 +4,7 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils.math import combine_frame_transforms
 from isaaclab.assets import RigidObject
 from isaaclab.utils.math import combine_frame_transforms, quat_error_magnitude, quat_mul
-from .helper import compute_gripper_midpoint_dot
+from .helper import compute_gripper_midpoint_dot, compute_cube_velocity_alignment
 from .....helpers.robotiq_fingertip_center_helper import get_left_right_fingertip_midpoint_pos_w
 
 def position_target_asset_delta_vector(env, asset_cfg, target_asset_cfg):
@@ -60,14 +60,14 @@ def fingertip_midpoint_to_target_vector(env, target_asset_cfg):
     target_pos_w = target_asset.data.body_state_w[:, 0, :3]
     return target_pos_w - gripper_fingertip_midpoint
 
-def inner_finger_gap_native(env, left_finger_cfg, right_finger_cfg):
+def inner_finger_gap_minus_cube_length_native(env, left_finger_cfg, right_finger_cfg, cube_length):
     left_finger_asset = env.scene[left_finger_cfg.name]
     right_finger_asset = env.scene[right_finger_cfg.name]
     left_tip_pos_w = left_finger_asset.data.body_pos_w[:, left_finger_cfg.body_ids[0], :3]
     right_tip_pos_w = right_finger_asset.data.body_pos_w[:, right_finger_cfg.body_ids[0], :3]
-    return torch.norm(left_tip_pos_w - right_tip_pos_w, dim=1, keepdim=True)
+    return torch.norm(left_tip_pos_w - right_tip_pos_w, dim=1, keepdim=True) - cube_length
 
-def inner_finger_midpoint_to_target_native(env, left_finger_cfg, right_finger_cfg, target_asset_cfg):
+def inner_finger_midpoint_vel_to_target_native(env, left_finger_cfg, right_finger_cfg, target_asset_cfg):
     left_finger_asset = env.scene[left_finger_cfg.name]
     right_finger_asset = env.scene[right_finger_cfg.name]
     left_finger_pos_w = left_finger_asset.data.body_pos_w[:, left_finger_cfg.body_ids[0], :3]
@@ -76,3 +76,53 @@ def inner_finger_midpoint_to_target_native(env, left_finger_cfg, right_finger_cf
     target_asset_pos_w = target_asset.data.body_state_w[:, 0, :3]
     midpoint_pos_w = (left_finger_pos_w + right_finger_pos_w) / 2.0
     return target_asset_pos_w - midpoint_pos_w
+
+def each_finger_to_target_native(env, left_finger_cfg, right_finger_cfg, target_asset_cfg):
+    left_finger_asset = env.scene[left_finger_cfg.name]
+    right_finger_asset = env.scene[right_finger_cfg.name]
+    left_finger_pos_w = left_finger_asset.data.body_pos_w[:, left_finger_cfg.body_ids[0], :3]
+    right_finger_pos_w = right_finger_asset.data.body_pos_w[:, right_finger_cfg.body_ids[0], :3]
+    target_asset: RigidObject = env.scene[target_asset_cfg.name]
+    target_asset_pos_w = target_asset.data.body_state_w[:, 0, :3]
+    left_finger_target_vector = target_asset_pos_w - left_finger_pos_w
+    rightfinger_target_vector = target_asset_pos_w - right_finger_pos_w
+    return torch.concat((left_finger_target_vector, rightfinger_target_vector), dim=1)
+
+def asset_to_command_vector(env, target_asset_cfg, command_name):
+    command = env.command_manager.get_command(command_name)
+    des_pos_b = command[:, :3]
+    des_pos_w = env.scene.env_origins + des_pos_b
+    cube_pos_w = env.scene[target_asset_cfg.name].data.root_pos_w
+    return des_pos_w - cube_pos_w
+
+def get_asset_vel(env, asset_cfg):
+    asset = env.scene[asset_cfg.name]
+    return asset.data.root_vel_w
+
+def get_body_vel(env, body_cfg):
+    body_idx = env.scene[body_cfg.name].find_bodies(body_cfg.body_names[0])[0][0]
+    return env.scene[body_cfg.name].data.body_vel_w[:, body_idx, :3]
+
+def get_env_origin(env):
+    res = env.scene.env_origins
+    return res
+
+def get_cube_velocity_alignment(env, asset_cfg, command_name):
+    (alignment_score, _, _, _, _, _) = compute_cube_velocity_alignment(env, asset_cfg, command_name)
+    return alignment_score
+
+def inner_finger_midpoint_vel_to_target_native(env, left_finger_cfg, right_finger_cfg, target_asset_cfg):
+    left_finger_asset = env.scene[left_finger_cfg.name]
+    right_finger_asset = env.scene[right_finger_cfg.name]
+    target_asset = env.scene[target_asset_cfg.name]
+    
+    left_body_id = left_finger_asset.find_bodies(left_finger_cfg.body_names[0])[0]
+    right_body_id = right_finger_asset.find_bodies(right_finger_cfg.body_names[0])[0]
+    
+    left_vel = left_finger_asset.data.body_vel_w[:, left_body_id, :3]
+    right_vel = right_finger_asset.data.body_vel_w[:, right_body_id, :3]
+    cube_vel = target_asset.data.root_vel_w[:, :3]
+    left_rel_vel = torch.norm(left_vel - cube_vel, dim=1, keepdim=True).squeeze(1)
+    right_rel_vel = torch.norm(right_vel - cube_vel, dim=1, keepdim=True).squeeze(1)
+    
+    return torch.concat([left_rel_vel, right_rel_vel], dim=1)

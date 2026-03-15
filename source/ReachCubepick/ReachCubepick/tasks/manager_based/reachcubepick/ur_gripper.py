@@ -23,10 +23,13 @@ from os import path
 EE_LINK_NAME = "ee_link"
 # FILE_NAME = "assets/UR10e-with-gripper.usd" # almost OK, but gripper shakes
 # FILE_NAME = "assets/UR10e-with-gripper-stiffness.usd"
-FILE_NAME = "assets/UR10e-with-gripper-stiffness2000.usd" # velocity_iterations to 32, wrist stiffness/damping to 1000/100
+
+# velocity_iterations to 32, wrist stiffness/damping to 1000/100, attach friction material to finger, finger stiffness/damping to 2000/200
+FILE_NAME = "assets/UR10e-with-gripper-stiffness2000.usd" 
 BASE_LINK_NAME = "world"
 EE_LINK_NAME = "robotiq_arg2f_base_link"
-
+ROBOT_PRIM_NAME = "ur_gripper"
+GRIPPER_PRIM_NAME = "robotiq_2f_140"
 UR_PATH = os.path.abspath(os.path.join(os.path.abspath(__file__),'../../../../../../../', FILE_NAME))
 UR_GRIPPER_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
@@ -90,8 +93,8 @@ UR_GRIPPER_CFG = ArticulationCfg(
             ],
             velocity_limit_sim=3.14,
             effort_limit_sim=56.0,
-            stiffness=2000.0,
-            damping=200.0,
+            stiffness=1000.0,
+            damping=100.0,
         ),
         "gripper": ImplicitActuatorCfg(
             joint_names_expr=[
@@ -106,8 +109,8 @@ UR_GRIPPER_CFG = ArticulationCfg(
             ],
             velocity_limit_sim=1.0,
             effort_limit_sim=100.0,
-            stiffness=500.0,
-            damping=100.0,
+            stiffness=2000.0,
+            damping=200.0,
         ),
     }
 )
