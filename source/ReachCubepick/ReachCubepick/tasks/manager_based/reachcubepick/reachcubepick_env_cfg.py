@@ -142,6 +142,15 @@ class ObservationsCfg:
             "right_finger_cfg": SceneEntityCfg("robot", body_names=["right_inner_finger"]),
             "target_asset_cfg": SceneEntityCfg("cube")
         })
+        finger_midpoint_to_target_native = ObsTerm(func=mdp.finger_midpoint_to_target_native, params={
+            "left_finger_cfg": SceneEntityCfg("robot", body_names=["left_inner_finger"]),
+            "right_finger_cfg": SceneEntityCfg("robot", body_names=["right_inner_finger"]),
+            "target_asset_cfg": SceneEntityCfg("cube")
+        })
+        finger_quat_native = ObsTerm(func=mdp.finger_quat_native, params={
+            "left_finger_cfg": SceneEntityCfg("robot", body_names=["left_inner_finger"]),
+            "right_finger_cfg": SceneEntityCfg("robot", body_names=["right_inner_finger"]),
+        })
         left_finger_sensor_forces = ObsTerm(
             func=mdp.contact_sensor_forces,
             params={"sensor_cfg": SceneEntityCfg(name="left_finger_contact_sensor")},
@@ -486,7 +495,7 @@ class CurriculumCfg:
     #         "modify_fn": override_param,
     #     }
     # )
-    increase_move_reward = CurrTerm(
+    increase_move_reward0 = CurrTerm(
         func=mdp.modify_reward_weight,
         params={
             "term_name": "cube_move_position_tracking_tanh_activated",
@@ -494,7 +503,7 @@ class CurriculumCfg:
             "num_steps": 500000
         }
     )
-    increase_move_reward_bigger = CurrTerm(
+    increase_move_reward1 = CurrTerm(
         func=mdp.modify_reward_weight,
         params={
             "term_name": "cube_move_position_tracking_tanh_activated",
@@ -502,7 +511,7 @@ class CurriculumCfg:
             "num_steps": 650000     
         }
     )
-    increase_move_reward_bigger = CurrTerm(
+    increase_move_reward2 = CurrTerm(
         func=mdp.modify_reward_weight,
         params={
             "term_name": "cube_move_position_tracking_tanh_activated",
@@ -510,7 +519,7 @@ class CurriculumCfg:
             "num_steps": 800000     
         }
     )
-    cube_move_towards_command_reward = CurrTerm(
+    cube_move_towards_command0 = CurrTerm(
         func=mdp.modify_reward_weight,
         params={
             "term_name": "cube_move_towards_command",
@@ -518,7 +527,7 @@ class CurriculumCfg:
             "num_steps": 500000
         }
     )
-    cube_move_towards_command_reward_bigger = CurrTerm(
+    cube_move_towards_command1 = CurrTerm(
         func=mdp.modify_reward_weight,
         params={
             "term_name": "cube_move_towards_command",
@@ -526,7 +535,7 @@ class CurriculumCfg:
             "num_steps": 650000     
         }
     )
-    cube_move_towards_command_reward_bigger = CurrTerm(
+    cube_move_towards_command2 = CurrTerm(
         func=mdp.modify_reward_weight,
         params={
             "term_name": "cube_move_towards_command",

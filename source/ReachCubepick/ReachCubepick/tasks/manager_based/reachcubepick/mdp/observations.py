@@ -4,7 +4,7 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils.math import combine_frame_transforms
 from isaaclab.assets import RigidObject
 from isaaclab.utils.math import combine_frame_transforms, quat_error_magnitude, quat_mul
-from .helper import compute_gripper_midpoint_dot, compute_cube_velocity_alignment
+from .helper import compute_gripper_midpoint_dot, compute_cube_velocity_alignment, get_to_target
 from .....helpers.robotiq_fingertip_center_helper import get_left_right_fingertip_midpoint_pos_w
 
 def position_target_asset_delta_vector(env, asset_cfg, target_asset_cfg):
@@ -87,6 +87,17 @@ def each_finger_to_target_native(env, left_finger_cfg, right_finger_cfg, target_
     left_finger_target_vector = target_asset_pos_w - left_finger_pos_w
     rightfinger_target_vector = target_asset_pos_w - right_finger_pos_w
     return torch.concat((left_finger_target_vector, rightfinger_target_vector), dim=1)
+
+def finger_midpoint_to_target_native(env, left_finger_cfg, right_finger_cfg, target_asset_cfg):
+    (mid_point, to_target) = get_to_target(env, left_finger_cfg, right_finger_cfg, target_asset_cfg)
+    return torch.concat((mid_point, to_target), dim=1)
+
+def finger_quat_native(env, left_finger_cfg, right_finger_cfg):
+    left_finger_asset = env.scene[left_finger_cfg.name]
+    right_finger_asset = env.scene[right_finger_cfg.name]
+    left_finger_quat_w = left_finger_asset.data.body_quat_w[:, left_finger_cfg.body_ids[0], :]
+    right_finger_quat_w = right_finger_asset.data.body_quat_w[:, left_finger_cfg.body_ids[0], :]
+    return torch.concat((left_finger_quat_w, right_finger_quat_w), dim=1)
 
 def asset_to_command_vector(env, target_asset_cfg, command_name):
     command = env.command_manager.get_command(command_name)
