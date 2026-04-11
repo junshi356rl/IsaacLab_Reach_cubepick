@@ -39,7 +39,7 @@ from pxr import Usd
 def get_random_translation():
     x = random.uniform(0.3, 0.6)
     y = random.uniform(0.1, 0.2)
-    z = CUBE_LEGNTH/2 + 0.001  # Slightly above the ground to avoid initial penetration
+    z = CUBE_LENGTH/2 + 0.001  # Slightly above the ground to avoid initial penetration
     if random.random() < 0.5:
         y = -y
 
@@ -55,9 +55,9 @@ def read_meters_per_unit_from_usd(file_path: str) -> float:
 ##
 
 ENV_SPACING = 2.5
-CUBE_LEGNTH = 0.08
-DIST_TOLERANCE = CUBE_LEGNTH/5
-GRASP_TOLERANCE = CUBE_LEGNTH/10
+CUBE_LENGTH = 0.08
+DIST_TOLERANCE = CUBE_LENGTH/5
+GRASP_TOLERANCE = CUBE_LENGTH/10
 CUBE_MASS = 0.5
 unit_scale = read_meters_per_unit_from_usd(UR_PATH)
 INNER_FINGER_SIZE = [unit_scale*0.0655, 0, 0] # https://blog.robotiq.com/hubfs/support-files/2F-85_2F-140_UR_PDF_20240402.pdf
@@ -65,6 +65,7 @@ MIN_FINGER_GAP = 0.01
 MAX_FINGER_GAP = 0.14
 EPISODE_LENGTH_S = 6.0
 STD_DIST = 0.15
+STD_GRASP = CUBE_LENGTH/4
 STD_DIST_MOVE = 0.04
 
 @configclass
@@ -76,7 +77,7 @@ class ReachcubepickSceneCfg(InteractiveSceneCfg):
     cube = RigidObjectCfg(
         prim_path="{ENV_REGEX_NS}/Cube",
         spawn=CuboidCfg(
-            size=(CUBE_LEGNTH, CUBE_LEGNTH, CUBE_LEGNTH),
+            size=(CUBE_LENGTH, CUBE_LENGTH, CUBE_LENGTH),
             mass_props=sim_utils.schemas.MassPropertiesCfg(mass=CUBE_MASS),
             rigid_props=sim_utils.schemas.RigidBodyPropertiesCfg(),
             collision_props=sim_utils.CollisionPropertiesCfg(),
@@ -123,12 +124,25 @@ class ObservationsCfg:
         
         ee_pos = ObsTerm(func=mdp.body_pose_w, params={"asset_cfg": SceneEntityCfg("robot", body_names=[EE_LINK_NAME])})
         # ee_vel = ObsTerm(func=mdp.get_body_vel, params={"body_cfg": SceneEntityCfg("robot", body_names=[EE_LINK_NAME])})
-
+        gripper_y_axis_approach = ObsTerm(
+                func=mdp.wrist_outside_normal_to_target_rad,
+                params={
+                    "ee_link_cfg": SceneEntityCfg("robot", body_names=[EE_LINK_NAME]),
+                    "target_asset_cfg": SceneEntityCfg("cube"),
+                }
+            )
+        finger_line_horizontal = ObsTerm(
+            func=mdp.finger_line_horizontal_obs,
+            params={
+                "left_finger_cfg": SceneEntityCfg("robot", body_names=["left_inner_finger"]),
+                "right_finger_cfg": SceneEntityCfg("robot", body_names=["right_inner_finger"]),
+            }
+        )
         env_origin = ObsTerm(func=mdp.get_env_origin)
         finger_gap_native = ObsTerm(func=mdp.inner_finger_gap_minus_cube_length_native, params={
             "left_finger_cfg": SceneEntityCfg("robot", body_names=["left_inner_finger"]),
             "right_finger_cfg": SceneEntityCfg("robot", body_names=["right_inner_finger"]),
-            "cube_length": CUBE_LEGNTH
+            "cube_length": CUBE_LENGTH
         })
         # cube_fingertip_mid_diff = ObsTerm(func=mdp.fingertip_midpoint_to_target_vector, params={
         #     "target_asset_cfg": SceneEntityCfg("cube")})
@@ -195,14 +209,14 @@ class ActionsCfg:
     arm_action: ActionTerm = mdp.JointPositionActionCfg(
         asset_name="robot",
         joint_names=["shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint", "wrist_1_joint", "wrist_2_joint", "wrist_3_joint"],
-        scale=1,
+        scale=0.5,
         use_default_offset=True,
         debug_vis=True
     )
     gripper_action: ActionTerm = mdp.JointPositionActionCfg(
         asset_name="robot",
         joint_names=["finger_joint"],
-        scale=1,
+        scale=0.2,
         use_default_offset=True,
         debug_vis=True
     )
@@ -240,7 +254,7 @@ class RewardsCfg:
     #         'target_asset_cfg': SceneEntityCfg("cube"),
     #     }
     # )
-    gripper_cube_dist_reward_native = RewTerm(
+    gripper_cube_dist = RewTerm(
         func=mdp.native_finger_midpoint_to_target_distance_reward,
         weight=5.0,
         params={
@@ -251,44 +265,94 @@ class RewardsCfg:
         }
     )
 
-    finger_grasp_reward_native = RewTerm(
-        func=mdp.native_finger_grasp_reward,
-        weight=5.0,
+    # finger_cube_orien_rel = RewTerm(
+    #     func=mdp.native_finger_grasp_reward,
+    #     weight=5.0,
+    #     params={
+    #         'std_dist': STD_DIST,
+    #         'std_grasp': STD_GRASP,
+    #         'left_finger_cfg': SceneEntityCfg("robot", body_names=["left_inner_finger"]),
+    #         'right_finger_cfg': SceneEntityCfg("robot", body_names=["right_inner_finger"]),
+    #         'target_asset_cfg': SceneEntityCfg("cube"),
+    #     }
+    # )
+
+    # finger_gap = RewTerm(
+    #     func=mdp.native_finger_gap_reward,
+    #     weight=5.0,
+    #     params={
+    #         'cube_length': CUBE_LEGNTH,
+    #         'std_dist': STD_DIST,
+    #         'left_finger_cfg': SceneEntityCfg("robot", body_names=["left_inner_finger"]),
+    #         'right_finger_cfg': SceneEntityCfg("robot", body_names=["right_inner_finger"]),
+    #         'target_asset_cfg': SceneEntityCfg("cube"),
+    #     }
+    # )
+
+    finger_symmetry = RewTerm(
+        func=mdp.finger_symmetry_reward,
+        weight=3.0,
         params={
-            'std_dist': STD_DIST,
+            'std_grasp': STD_GRASP,
+            'target_asset_cfg': SceneEntityCfg("cube"),
             'left_finger_cfg': SceneEntityCfg("robot", body_names=["left_inner_finger"]),
             'right_finger_cfg': SceneEntityCfg("robot", body_names=["right_inner_finger"]),
-            'target_asset_cfg': SceneEntityCfg("cube"),
         }
     )
-
-    finger_gap_reward_native = RewTerm(
-        func=mdp.native_finger_gap_reward,
-        weight=5.0,
+    finger_opposition = RewTerm(
+        func=mdp.finger_opposition_reward,
+        weight=3.0,
         params={
-            'cube_length': CUBE_LEGNTH,
-            'std_dist': STD_DIST,
+            'target_asset_cfg': SceneEntityCfg("cube"),
             'left_finger_cfg': SceneEntityCfg("robot", body_names=["left_inner_finger"]),
             'right_finger_cfg': SceneEntityCfg("robot", body_names=["right_inner_finger"]),
-            'target_asset_cfg': SceneEntityCfg("cube"),
         }
     )
 
     finger_height_alignment = RewTerm(
         func=mdp.finger_height_alignment_reward,
-        weight=5.0,
+        weight=3.0,
         params={
             'left_finger_cfg': SceneEntityCfg("robot", body_names=["left_inner_finger"]),
             'right_finger_cfg': SceneEntityCfg("robot", body_names=["right_inner_finger"]),
             'target_asset_cfg': SceneEntityCfg("cube"),
-            'std_height': CUBE_LEGNTH/4, 
+            'std_height': CUBE_LENGTH/4, 
         }
     )
 
-    contact_grasp_reward = RewTerm(
+    contact_grasp = RewTerm(
         func=mdp.contact_grasp_reward, # increased from 0.0
         weight=5.0,
         params={'force_scale': 10.0, "sensor1_cfg": SceneEntityCfg("left_finger_contact_sensor"), "sensor2_cfg": SceneEntityCfg("right_finger_contact_sensor")}
+    )
+    
+    wrist_outside_normal_to_target = RewTerm(
+        func=mdp.wrist_outside_normal_to_target_reward,
+        weight=3.0,
+        params={
+            "ee_link_cfg": SceneEntityCfg("robot", body_names=[EE_LINK_NAME]),
+            "target_asset_cfg": SceneEntityCfg("cube"),
+            "std_angle": 0.5,
+        }
+    )
+    finger_line_horizontal = RewTerm(
+        func=mdp.finger_line_horizontal_reward,
+        weight=3.0,
+        params={
+            "left_finger_cfg": SceneEntityCfg("robot", body_names=["left_inner_finger"]),
+            "right_finger_cfg": SceneEntityCfg("robot", body_names=["right_inner_finger"]),
+        }
+    )
+    finger_closure = RewTerm(
+        func=mdp.finger_closure_reward,
+        weight=5.0,
+        params={
+            'left_finger_cfg': SceneEntityCfg("robot", body_names=["left_inner_finger"]),
+            'right_finger_cfg': SceneEntityCfg("robot", body_names=["right_inner_finger"]),
+            'target_width': CUBE_LENGTH,
+            'activation_dist': CUBE_LENGTH*0.75,
+            'std_gap': CUBE_LENGTH * 1.5
+        }
     )
     # gripper_grasp_cube_reward = RewTerm(
     #     func=mdp.gripper_grasp_cube_reward,
@@ -316,7 +380,7 @@ class RewardsCfg:
     # )
 
     # Increase it in the CurriculumCfg
-    cube_move_position_tracking_tanh_activated = RewTerm(
+    cube_command_dist = RewTerm(
         func=mdp.position_command_error_tanh,
         weight=0.0,
         params={
@@ -334,42 +398,33 @@ class RewardsCfg:
         params={
                 "asset_cfg": SceneEntityCfg("cube"),
                 "command_name": "move_target",
-                "cube_length": CUBE_LEGNTH
+                "cube_length": CUBE_LENGTH
                 }
     )
 
-    # contact_grasp_reward = RewTerm(
-    #     func=mdp.contact_grasp_reward,
-    #     weight=0.5, 
-    #     params={
-    #         'force_scale': 5.0
-    #     }
-    # )
-
     action_rate = RewTerm(
         func=mdp.action_rate_l2, 
-        weight=-0.01
+        weight=-0.001
     )
     joint_vel = RewTerm(
         func=mdp.joint_vel_l2,
         weight=-0.01,
         params={
-            "asset_cfg": SceneEntityCfg("robot",
-                                        joint_ids=[0, 1, 2, 3, 4, 5, 6])}, # exclude mimic joints
+            "asset_cfg": SceneEntityCfg("robot")}, # exclude mimic joints
     )
+    # joint_vel = RewTerm(
+    #     func=mdp.joint_vel_l2,
+    #     weight=-0.01,
+    #     params={
+    #         "asset_cfg": SceneEntityCfg("robot",
+    #                                     joint_ids=[0, 1, 2, 3, 4, 5, 6])}, # exclude mimic joints
+    # )
     # gripper_effort_penalty = RewTerm(
     #     func=mdp.joint_torques_l2,
     #     weight=-0.001,
     #     params={
     #         "asset_cfg": SceneEntityCfg("robot", joint_ids=[6])
     #     }
-    # )
-    # joint_vel_gripper = RewTerm(
-    #     func=mdp.joint_vel_l2,
-    #     weight=-1.0,
-    #     params={
-    #         "asset_cfg": SceneEntityCfg("robot", joint_ids=[6, 7, 8, 9, 10, 11])
-    #     },
     # )
     termination_penalty = RewTerm(
         func=mdp.is_terminated,
@@ -381,7 +436,13 @@ def joint_vel_too_high(env, threshold: float, asset_cfg: SceneEntityCfg):
     """Termination if any joint velocity exceeds the threshold."""
     asset = env.scene[asset_cfg.name]
     joint_vels = asset.data.joint_vel[:, asset_cfg.joint_ids]
-    return torch.any(torch.abs(joint_vels) > threshold, dim=1)
+    mask = torch.any(torch.abs(joint_vels) > threshold, dim=1)
+    # Periodic debug: every 1000 steps print how many envs exceed the threshold
+    if env.unwrapped.common_step_counter % 1000 == 0:
+        count = int(mask.sum().item())
+        if count:
+            print(f"[DEBUG] joint_vel_too_high - count: {count}/{env.num_envs}, threshold: {threshold}, step: {env.unwrapped.common_step_counter}")
+    return mask
 
 def cube_distance_too_far(
     env,
@@ -420,7 +481,7 @@ class TerminationsCfg:
         func=joint_vel_too_high, 
         params={
             "threshold": 10.0,
-            "asset_cfg": SceneEntityCfg("robot", joint_ids=[0, 1, 2, 3, 4, 5, 6])
+            "asset_cfg": SceneEntityCfg("robot", joint_ids=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
         }
     )
     cube_too_far = DoneTerm(
@@ -451,7 +512,7 @@ class EventCfg:
             "pose_range": {
                 "x": (0.35, 0.5),
                 "y": (-0.2, 0.3),
-                "z": (CUBE_LEGNTH/2 + 0.001, CUBE_LEGNTH/2 + 0.001),  # Slightly above the ground to avoid initial penetration
+                "z": (CUBE_LENGTH/2 + 0.001, CUBE_LENGTH/2 + 0.001),  # Slightly above the ground to avoid initial penetration
             },
             'velocity_range': {"x": (0.0, 0.0), "y": (0.0, 0.0), "z": (0.0, 0.0)},
             "asset_cfg": SceneEntityCfg("cube"),
@@ -495,10 +556,38 @@ class CurriculumCfg:
     #         "modify_fn": override_param,
     #     }
     # )
+    # closure_schedule = CurrTerm(
+    #     func=mdp.modify_reward_weight,
+    #     params={"term_name": "finger_closure", "weight": 3.0, "num_steps": 40000}
+    # )
+    contact_schedule0 = CurrTerm(
+        func=mdp.modify_reward_weight,
+        params={"term_name": "contact_grasp", "weight": 7.0, "num_steps": 500000}
+    )
+    contact_schedule1= CurrTerm(
+        func=mdp.modify_reward_weight,
+        params={"term_name": "contact_grasp", "weight": 8.0, "num_steps": 600000}
+    )
+    contact_schedule2= CurrTerm(
+        func=mdp.modify_reward_weight,
+        params={"term_name": "contact_grasp", "weight": 9.0, "num_steps": 700000}
+    )
+    contact_schedule3= CurrTerm(
+        func=mdp.modify_reward_weight,
+        params={"term_name": "contact_grasp", "weight": 10.0, "num_steps": 800000}
+    )
+    contact_schedule4= CurrTerm(
+        func=mdp.modify_reward_weight,
+        params={"term_name": "contact_grasp", "weight": 11.0, "num_steps": 900000}
+    )
+    contact_schedule5 = CurrTerm(
+        func=mdp.modify_reward_weight,
+        params={"term_name": "contact_grasp", "weight": 12.0, "num_steps": 1000000}
+    )
     increase_move_reward0 = CurrTerm(
         func=mdp.modify_reward_weight,
         params={
-            "term_name": "cube_move_position_tracking_tanh_activated",
+            "term_name": "cube_command_dist",
             "weight": 1.0,          
             "num_steps": 500000
         }
@@ -506,7 +595,7 @@ class CurriculumCfg:
     increase_move_reward1 = CurrTerm(
         func=mdp.modify_reward_weight,
         params={
-            "term_name": "cube_move_position_tracking_tanh_activated",
+            "term_name": "cube_command_dist",
             "weight": 3.0,          
             "num_steps": 650000     
         }
@@ -514,9 +603,33 @@ class CurriculumCfg:
     increase_move_reward2 = CurrTerm(
         func=mdp.modify_reward_weight,
         params={
-            "term_name": "cube_move_position_tracking_tanh_activated",
+            "term_name": "cube_command_dist",
             "weight": 5.0,          
             "num_steps": 800000     
+        }
+    )
+    increase_move_reward3 = CurrTerm(
+        func=mdp.modify_reward_weight,
+        params={
+            "term_name": "cube_command_dist",
+            "weight": 7.0,          
+            "num_steps": 1000000     
+        }
+    )
+    increase_move_reward4 = CurrTerm(
+        func=mdp.modify_reward_weight,
+        params={
+            "term_name": "cube_command_dist",
+            "weight": 8.0,          
+            "num_steps": 1200000     
+        }
+    )
+    increase_move_reward5 = CurrTerm(
+        func=mdp.modify_reward_weight,
+        params={
+            "term_name": "cube_command_dist",
+            "weight": 10.0,          
+            "num_steps": 1500000     
         }
     )
     cube_move_towards_command0 = CurrTerm(
@@ -543,22 +656,40 @@ class CurriculumCfg:
             "num_steps": 800000     
         }
     )
-    # increase_contact_grasp_reward = CurrTerm(
-    #     func=mdp.modify_reward_weight,
-    #     params={
-    #         "term_name": "contact_grasp_reward",
-    #         "weight": 3.0,          
-    #         "num_steps": 500000     
-    #     }
-    # )
-    # increase_contact_grasp_reward_bigger = CurrTerm(
-    #     func=mdp.modify_reward_weight,
-    #     params={
-    #         "term_name": "contact_grasp_reward",
-    #         "weight": 5.0,          
-    #         "num_steps": 800000     
-    #     }
-    # )
+    cube_move_towards_command3 = CurrTerm(
+        func=mdp.modify_reward_weight,
+        params={
+            "term_name": "cube_move_towards_command",
+            "weight": 7.0,          
+            "num_steps": 1000000     
+        }
+    )
+    cube_move_towards_command4 = CurrTerm(
+        func=mdp.modify_reward_weight,
+        params={
+            "term_name": "cube_move_towards_command",
+            "weight": 8.0,          
+            "num_steps": 1200000     
+        }
+    )
+    cube_move_towards_command5 = CurrTerm(
+        func=mdp.modify_reward_weight,
+        params={
+            "term_name": "cube_move_towards_command",
+            "weight": 10.0,          
+            "num_steps": 1500000     
+        }
+    )
+    action_rate_0 = CurrTerm(
+        func=mdp.modify_reward_weight, params={"term_name": "action_rate", "weight": -0.003, "num_steps": 300000}
+    )
+    action_rate_1 = CurrTerm(
+        func=mdp.modify_reward_weight, params={"term_name": "action_rate", "weight": -0.006, "num_steps": 1000000}
+    )
+    action_rate_2 = CurrTerm(
+        func=mdp.modify_reward_weight, params={"term_name": "action_rate", "weight": -0.01, "num_steps": 1500000}
+    )
+
 
 
 ##

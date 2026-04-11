@@ -4,7 +4,7 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils.math import combine_frame_transforms
 from isaaclab.assets import RigidObject
 from isaaclab.utils.math import combine_frame_transforms, quat_error_magnitude, quat_mul
-from .helper import compute_gripper_midpoint_dot, compute_cube_velocity_alignment, get_to_target
+from .helper import compute_gripper_midpoint_dot, compute_cube_velocity_alignment, get_to_target, wrist_outside_normal_to_target, get_finger_line_horizontal_info
 from .....helpers.robotiq_fingertip_center_helper import get_left_right_fingertip_midpoint_pos_w
 
 def position_target_asset_delta_vector(env, asset_cfg, target_asset_cfg):
@@ -137,3 +137,22 @@ def inner_finger_midpoint_vel_to_target_native(env, left_finger_cfg, right_finge
     right_rel_vel = torch.norm(right_vel - cube_vel, dim=1, keepdim=True).squeeze(1)
     
     return torch.concat([left_rel_vel, right_rel_vel], dim=1)
+
+def wrist_outside_normal_to_target_rad(
+    env: "ManagerBasedRLEnv",
+    ee_link_cfg: SceneEntityCfg,
+    target_asset_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+
+    dot_product = wrist_outside_normal_to_target(env, ee_link_cfg, target_asset_cfg)
+    
+    angle_rad = torch.acos(dot_product)  # [0, π/2]
+    return angle_rad.unsqueeze(-1)
+
+def finger_line_horizontal_obs(
+    env: "ManagerBasedRLEnv",
+    left_finger_cfg: SceneEntityCfg,
+    right_finger_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+    info = get_finger_line_horizontal_info(env, left_finger_cfg, right_finger_cfg)
+    return info["angle_rad"].unsqueeze(-1)

@@ -10,7 +10,7 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils.math import combine_frame_transforms
 from isaaclab.assets import RigidObject
 from isaaclab.utils.math import combine_frame_transforms, quat_error_magnitude, quat_mul, quat_rotate_inverse, normalize
-from .helper import compute_gripper_midpoint_dot, compute_cube_velocity_alignment
+from .helper import compute_gripper_midpoint_dot, compute_cube_velocity_alignment, wrist_outside_normal_to_target, get_finger_line_horizontal_info
 from .debug_helper import debug_robot_state, debug_cube_move_state
 import math
 from .....helpers.robotiq_fingertip_center_helper import get_left_right_fingertip_midpoint_pos_w, lab_tip_center_pos_w, FingertipInitCfg, get_left_right_fingertip_gap
@@ -140,33 +140,29 @@ def gripper_grasp_cube_reward(
     return grasp_quality * 2.0 + is_success * grasp_success_reward
 
 def contact_grasp_reward(env: ManagerBasedRLEnv, force_scale: float, sensor1_cfg: SceneEntityCfg, sensor2_cfg: SceneEntityCfg) -> torch.Tensor:
-    contact_data1 = env.scene[sensor1_cfg.name].data.force_matrix_w
-    contact_force1 = torch.norm(contact_data1[:, -1, :], dim=-1).squeeze()
-    contact_reward1 = torch.clamp(contact_force1 / force_scale, max=1.0)
-
-    if sensor2_cfg is not None:
-        contact_data2 = env.scene[sensor2_cfg.name].data.force_matrix_w
-        contact_force2 = torch.norm(contact_data2[:, -1, :], dim=-1).squeeze()
-        contact_reward2 = torch.clamp(contact_force2 / force_scale, max=1.0)
-        contact_reward = torch.min(contact_reward1, contact_reward2)
-    else:
-        contact_reward = contact_reward1
+    s1 = env.scene[sensor1_cfg.name]
+    s2 = env.scene[sensor2_cfg.name]
+    f1 = torch.norm(s1.data.force_matrix_w.squeeze(dim=(1,2)), dim=-1)
+    f2 = torch.norm(s2.data.force_matrix_w.squeeze(dim=(1,2)), dim=-1)
+    
+    avg_force = (f1 + f2) / 2.0
+    contact_reward = torch.tanh(avg_force / force_scale)
 
     if env.unwrapped.common_step_counter % 10000 == 0 and env.unwrapped.common_step_counter > 0:
         if sensor2_cfg is not None:
-            has_contact = (contact_force1 > 0.1) | (contact_force2 > 0.1)
+            has_contact = (f1 > 0.1) | (f2 > 0.1)
             num_contact = has_contact.sum().item()
             print(f"[DEBUG] Step {env.unwrapped.common_step_counter}:")
             print(f"  Contact - envs: {num_contact}/{env.num_envs} ({100*num_contact/env.num_envs:.1f}%)")
-            print(f"  force1 - mean: {contact_force1[contact_force1>0.1].mean().item() if (contact_force1>0.1).any() else 0:.4f}N, "
-                  f"force2 - mean: {contact_force2[contact_force2>0.1].mean().item() if (contact_force2>0.1).any() else 0:.4f}N")
+            print(f"  force1 - mean: {f1[f1>0.1].mean().item() if (f1>0.1).any() else 0:.4f}N, "
+                  f"force2 - mean: {f2[f2>0.1].mean().item() if (f2>0.1).any() else 0:.4f}N")
             print(f"  reward - mean: {contact_reward.mean().item():.6f}")
         else:
-            has_contact = contact_force1 > 0.1
+            has_contact = f1 > 0.1
             num_contact = has_contact.sum().item()
             print(f"[DEBUG] Step {env.unwrapped.common_step_counter}:")
             print(f"  Contact - envs: {num_contact}/{env.num_envs} ({100*num_contact/env.num_envs:.1f}%), "
-                  f"force: {contact_force1[has_contact].mean().item() if num_contact > 0 else 0:.4f}N, "
+                  f"force: {f1[has_contact].mean().item() if num_contact > 0 else 0:.4f}N, "
                   f"reward: {contact_reward.mean().item():.6f}")
 
     return contact_reward
@@ -244,10 +240,39 @@ def print_reward(
 def native_finger_midpoint_to_target_distance_reward(env: ManagerBasedRLEnv, std_dist, left_finger_cfg, right_finger_cfg, target_asset_cfg) -> torch.Tensor:
     _, _, midpoint_pos_w = get_finger_features(env, left_finger_cfg, right_finger_cfg)
     distance = get_target_distance(env, target_asset_cfg, midpoint_pos_w)
-    dist_reward = 1.0 - torch.tanh(distance / std_dist)
+    # dist_reward = 1.0 - torch.tanh(distance / std_dist)
+    dist_reward = torch.exp(-distance / std_dist)
     debug_robot_state(env)
     print_reward(env, print_freq=1000, metric_name="midpoint_to_target_distance", metric_value=distance, reward_name="midpoint_to_target_distance_reward", reward_value=dist_reward)
     return dist_reward
+
+def finger_closure_reward(env: ManagerBasedRLEnv, 
+                          left_finger_cfg: SceneEntityCfg,
+                          right_finger_cfg: SceneEntityCfg,
+                          target_width: float,
+                          activation_dist: float,
+                          std_gap: float) -> torch.Tensor:
+    left_finger_pos_w, right_finger_pos_w, midpoint_pos_w = get_finger_features(env, left_finger_cfg, right_finger_cfg)
+    
+    gap = torch.norm(left_finger_pos_w - right_finger_pos_w, dim=1)
+    target_gap = target_width * 0.99
+    gap_error = torch.abs(gap - target_gap)
+    
+    cube_w = env.scene["cube"].data.root_pos_w[:, :3]
+    dist = torch.norm(midpoint_pos_w - cube_w, dim=1)
+    
+    closure_reward = torch.clamp(1.0 - gap_error / std_gap, min=0.0, max=1.0)
+    
+    reward = torch.where(
+        dist <= activation_dist,
+        closure_reward,
+        torch.zeros_like(closure_reward)
+    )
+    print_reward(env, print_freq=1000, metric_name="dist", metric_value=dist, reward_name="closure_reward", reward_value=closure_reward)
+    print_reward(env, print_freq=1000, metric_name="gap", metric_value=gap, reward_name="closure_reward", reward_value=closure_reward)
+    print_reward(env, print_freq=1000, metric_name="gap_error", metric_value=gap_error, reward_name="reward", reward_value=reward)
+    
+    return reward
 
 def finger_height_alignment_reward(
     env: ManagerBasedRLEnv,
@@ -281,33 +306,56 @@ def finger_height_alignment_reward(
     return reward
 
 
-def native_finger_grasp_reward(env: ManagerBasedRLEnv, std_dist, left_finger_cfg, right_finger_cfg, target_asset_cfg) -> torch.Tensor:
-    target_asset: RigidObject = env.scene[target_asset_cfg.name]
-    target_asset_pos_w = target_asset.data.root_pos_w[:, :3]
+# def native_finger_grasp_reward(env: ManagerBasedRLEnv, std_dist, std_grasp, left_finger_cfg, right_finger_cfg, target_asset_cfg) -> torch.Tensor:
+#     target_asset: RigidObject = env.scene[target_asset_cfg.name]
+#     target_asset_pos_w = target_asset.data.root_pos_w[:, :3]
+#     left_finger_pos_w, right_finger_pos_w, midpoint_pos_w = get_finger_features(env, left_finger_cfg, right_finger_cfg)
+    
+#     distance = get_target_distance(env, target_asset_cfg, midpoint_pos_w)
+#     dist_factor = torch.exp(-distance / std_dist)
+    
+#     left_to_target = left_finger_pos_w - target_asset_pos_w
+#     right_to_target = right_finger_pos_w - target_asset_pos_w
+#     left_to_target_len = torch.norm(left_to_target, dim=1)
+#     right_to_target_len = torch.norm(right_to_target, dim=1)
+#     eps = 1e-6
+#     left_vec_norm = left_to_target / (left_to_target_len.unsqueeze(-1) + eps)
+#     right_vec_norm = right_to_target / (right_to_target_len.unsqueeze(-1) + eps)
+
+#     length_diff = torch.abs(left_to_target_len - right_to_target_len)
+#     length_reward = torch.exp(-length_diff / std_grasp)
+    
+#     dot_product = torch.sum(left_vec_norm * right_vec_norm, dim=1)
+#     opposite_error = torch.abs(dot_product + 1.0)
+#     opposite_reward = torch.exp(-opposite_error*3.0)
+    
+#     grasp_quality = length_reward * opposite_reward * dist_factor
+#     # grasp_quality = opposite_reward * dist_factor
+#     if env.unwrapped.common_step_counter % 10000 == 0:
+#             print("[native_finger_grasp_reward]:")
+#             print_reward(env, print_freq=1000, metric_name="length_diff", metric_value=length_diff, reward_name="length_reward", reward_value=length_reward)
+#             print_reward(env, print_freq=1000, metric_name="opposite_error", metric_value=opposite_error, reward_name="opposite_reward", reward_value=opposite_reward)
+#             print_reward(env, print_freq=1000, metric_name="distance", metric_value=distance, reward_name="dist_factor", reward_value=dist_factor)
+#     return grasp_quality
+
+
+def finger_symmetry_reward(env, target_asset_cfg, left_finger_cfg, right_finger_cfg, std_grasp):
+    target_pos = env.scene[target_asset_cfg.name].data.root_pos_w[:, :3]
     left_finger_pos_w, right_finger_pos_w, midpoint_pos_w = get_finger_features(env, left_finger_cfg, right_finger_cfg)
-    
-    distance = get_target_distance(env, target_asset_cfg, midpoint_pos_w)
-    dist_factor = torch.exp(-distance / std_dist)
-    
-    left_to_target = left_finger_pos_w - target_asset_pos_w
-    right_to_target = right_finger_pos_w - target_asset_pos_w
-    left_to_target_len = torch.norm(left_to_target, dim=1)
-    right_to_target_len = torch.norm(right_to_target, dim=1)
-    eps = 1e-6
-    left_vec_norm = left_to_target / (left_to_target_len.unsqueeze(-1) + eps)
-    right_vec_norm = right_to_target / (right_to_target_len.unsqueeze(-1) + eps)
+    l_dist = torch.norm(left_finger_pos_w - target_pos, dim=1)
+    r_dist = torch.norm(right_finger_pos_w - target_pos, dim=1)
+    diff = torch.abs(l_dist - r_dist)
+    return torch.exp(-diff / std_grasp)
 
-    # length_diff = torch.abs(left_to_target_len - right_to_target_len)
-    # length_reward = torch.exp(-length_diff / std_dist)
-    
-    dot_product = torch.sum(left_vec_norm * right_vec_norm, dim=1)
-    opposite_error = torch.abs(dot_product + 1.0)
-    opposite_reward = torch.exp(-opposite_error*3.0)
-    
-    # grasp_quality = length_reward * opposite_reward * dist_factor
-    grasp_quality = opposite_reward * dist_factor
-
-    return grasp_quality
+def finger_opposition_reward(env, target_asset_cfg, left_finger_cfg, right_finger_cfg):
+    target_pos = env.scene[target_asset_cfg.name].data.root_pos_w[:, :3]
+    left_finger_pos_w, right_finger_pos_w, midpoint_pos_w = get_finger_features(env, left_finger_cfg, right_finger_cfg)
+    v_left = left_finger_pos_w - target_pos
+    v_right = right_finger_pos_w - target_pos
+    v_left_n = v_left / (torch.norm(v_left, dim=1, keepdim=True) + 1e-6)
+    v_right_n = v_right / (torch.norm(v_right, dim=1, keepdim=True) + 1e-6)
+    dot = torch.sum(v_left_n * v_right_n, dim=1)
+    return torch.exp(-torch.abs(dot + 1.0) * 3.0)
 
 def native_finger_gap_reward(
         env: ManagerBasedRLEnv,
@@ -358,3 +406,56 @@ def asset_vel_to_command(
     ).squeeze()
     
     return result
+
+def debug_gripper_y_axis(env, ee_link_cfg, target_asset_cfg, print_freq=1000):
+    if env.unwrapped.common_step_counter % print_freq != 0:
+        return
+    
+    dot_product = wrist_outside_normal_to_target(env, ee_link_cfg, target_asset_cfg)
+    angle_rad = torch.acos(dot_product)
+    angle_deg = angle_rad * 180.0 / math.pi
+    
+    print(f"[DEBUG] Step {env.unwrapped.common_step_counter}:")
+    print(f"  Y-Axis to Approach Angle:")
+    print(f"    dot_product - mean: {dot_product.mean().item():.3f}, "
+          f"std: {dot_product.std().item():.3f}")
+    print(f"    angle (deg) - mean: {angle_deg.mean().item():.1f}°, "
+          f"min: {angle_deg.min().item():.1f}°, max: {angle_deg.max().item():.1f}°")
+    print(f"    good alignment (<30°): {(angle_deg < 30).sum().item()}/{env.num_envs}")
+    print(f"    bad alignment (>60°): {(angle_deg > 60).sum().item()}/{env.num_envs}")
+
+def wrist_outside_normal_to_target_reward(
+    env: ManagerBasedRLEnv,
+    ee_link_cfg: SceneEntityCfg,
+    target_asset_cfg: SceneEntityCfg,
+    std_angle: float = 0.5,
+) -> torch.Tensor:
+
+    dot_product = wrist_outside_normal_to_target(env, ee_link_cfg, target_asset_cfg)
+    reward = torch.exp(-(1 - dot_product) ** 2 / std_angle)
+    
+    if env.unwrapped.common_step_counter % 10000 == 0:
+        print(f"[DEBUG] Y-Axis Approach - "
+              f"dot mean: {dot_product.mean().item():.3f}, "
+              f"reward mean: {reward.mean().item():.3f}, "
+              f"good (>0.8): {(reward > 0.8).sum().item()}/{env.num_envs}")
+        debug_gripper_y_axis(env, ee_link_cfg, target_asset_cfg)
+    
+    return reward
+
+
+def finger_line_horizontal_reward(
+    env: "ManagerBasedRLEnv",
+    left_finger_cfg: SceneEntityCfg,
+    right_finger_cfg: SceneEntityCfg,
+    std_angle: float = 0.3,
+) -> torch.Tensor:
+    info = get_finger_line_horizontal_info(env, left_finger_cfg, right_finger_cfg)
+    reward = torch.exp(-(info["angle_rad"] ** 2) / std_angle)
+    
+    if env.unwrapped.common_step_counter % 10000 == 0:
+        print(f"[DEBUG] Finger Line Horizontal - "
+              f"angle mean: {info['angle_deg'].mean().item():.1f}°, "
+              f"reward mean: {reward.mean().item():.3f}, "
+              f"good (<15°): {(info['angle_deg'] < 15).sum().item()}/{env.num_envs}")
+    return reward

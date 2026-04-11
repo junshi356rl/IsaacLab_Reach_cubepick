@@ -1,7 +1,7 @@
 from __future__ import annotations
 import torch
 from typing import TYPE_CHECKING
-from isaaclab.utils.math import normalize
+from isaaclab.utils.math import normalize, quat_apply
 from isaaclab.managers import SceneEntityCfg
 
 if TYPE_CHECKING:
@@ -118,3 +118,64 @@ def compute_cube_velocity_alignment(
     
     return (alignment, to_target_dir, vel_dir, cube_speed, cube_vel, to_target_dist)
 
+def wrist_outside_normal_to_target(
+    env: ManagerBasedRLEnv,
+    ee_link_cfg: SceneEntityCfg,
+    target_asset_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+
+    ee_asset = env.scene[ee_link_cfg.name]
+    ee_body_id = ee_asset.find_bodies(ee_link_cfg.body_names[0])[0]
+    ee_quat_w = ee_asset.data.body_quat_w[:, ee_body_id, :]  # (N, 4), [w, x, y, z]
+    
+    ee_pos_w = ee_asset.data.body_pos_w[:, ee_body_id, :3].squeeze(1)  # (N, 3)
+    
+    target_asset = env.scene[target_asset_cfg.name]
+    target_pos_w = target_asset.data.root_pos_w[:, :3]  # (N, 3)
+    
+    approach_vec = target_pos_w - ee_pos_w  # (N, 3)
+    approach_dist = torch.norm(approach_vec, dim=1, keepdim=True) + 1e-6
+    approach_vec_norm = approach_vec / approach_dist  # (N, 3)
+    
+    
+    ee_local_z_axis = torch.tensor([0.0, 0.0, 1.0], device=ee_quat_w.device).unsqueeze(0).expand(ee_quat_w.shape[0], -1)
+    ee_world_z_axis = quat_apply(ee_quat_w, ee_local_z_axis)  # (N, 3)
+    dot_product = torch.sum(ee_world_z_axis * approach_vec_norm, dim=1)  # (N,)
+    dot_product = torch.clamp(dot_product, -1.0, 1.0)
+    
+    return dot_product
+
+
+def get_finger_line_horizontal_info(
+    env: "ManagerBasedRLEnv",
+    left_finger_cfg: SceneEntityCfg,
+    right_finger_cfg: SceneEntityCfg,
+) -> dict:
+    left_finger_asset = env.scene[left_finger_cfg.name]
+    right_finger_asset = env.scene[right_finger_cfg.name]
+    
+    left_body_id = left_finger_asset.find_bodies(left_finger_cfg.body_names[0])[0]
+    right_body_id = right_finger_asset.find_bodies(right_finger_cfg.body_names[0])[0]
+    
+    left_pos_w = left_finger_asset.data.body_pos_w[:, left_body_id, :3].squeeze(1)
+    right_pos_w = right_finger_asset.data.body_pos_w[:, right_body_id, :3].squeeze(1)
+    
+    line_vector = right_pos_w - left_pos_w
+    line_vector_norm = normalize(line_vector)
+    
+    z_component = torch.abs(line_vector_norm[:, 2])
+    z_component = torch.clamp(z_component, 0.0, 1.0)
+    
+    angle_rad = torch.asin(z_component)
+    angle_deg = angle_rad * 180.0 / torch.pi
+    
+    xy_projection = torch.sqrt(line_vector_norm[:, 0]**2 + line_vector_norm[:, 1]**2)
+    
+    return {
+        "line_vector": line_vector,
+        "line_vector_norm": line_vector_norm,
+        "z_component": z_component,
+        "xy_projection": xy_projection,
+        "angle_deg": angle_deg,
+        "angle_rad": angle_rad,
+    }
