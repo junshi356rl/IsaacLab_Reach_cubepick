@@ -236,8 +236,8 @@ class CommandsCfg:
         debug_vis=True,
         ranges=mdp.UniformPoseCommandCfg.Ranges(
             pos_x=(0.6, 0.8),
-            pos_y=(-0.1, 0.1),
-            pos_z=(0, 0),
+            pos_y=(-0.5, -0.3),
+            pos_z=(0.1, 0.3),
             roll=(0.0, 0.0),
             pitch=(0.0, 0.0),
             yaw=(0.0, 0.0),
@@ -511,7 +511,7 @@ class EventCfg:
         params={
             "pose_range": {
                 "x": (0.35, 0.5),
-                "y": (-0.2, 0.3),
+                "y": (0.3, 0.5),
                 "z": (CUBE_LENGTH/2 + 0.001, CUBE_LENGTH/2 + 0.001),  # Slightly above the ground to avoid initial penetration
             },
             'velocity_range': {"x": (0.0, 0.0), "y": (0.0, 0.0), "z": (0.0, 0.0)},
@@ -558,7 +558,7 @@ class CurriculumCfg:
     # )
     # closure_schedule = CurrTerm(
     #     func=mdp.modify_reward_weight,
-    #     params={"term_name": "finger_closure", "weight": 3.0, "num_steps": 40000}
+    #     params={"term_name": "finger_closure", "weight": 5.0, "num_steps": 100000}
     # )
     contact_schedule0 = CurrTerm(
         func=mdp.modify_reward_weight,
@@ -677,7 +677,15 @@ class CurriculumCfg:
         params={
             "term_name": "cube_move_towards_command",
             "weight": 10.0,          
-            "num_steps": 1500000     
+            "num_steps": 1400000     
+        }
+    )
+    cube_move_towards_command6 = CurrTerm(
+        func=mdp.modify_reward_weight,
+        params={
+            "term_name": "cube_move_towards_command",
+            "weight": 12.0,          
+            "num_steps": 1600000     
         }
     )
     action_rate_0 = CurrTerm(
@@ -687,7 +695,7 @@ class CurriculumCfg:
         func=mdp.modify_reward_weight, params={"term_name": "action_rate", "weight": -0.006, "num_steps": 1000000}
     )
     action_rate_2 = CurrTerm(
-        func=mdp.modify_reward_weight, params={"term_name": "action_rate", "weight": -0.01, "num_steps": 1500000}
+        func=mdp.modify_reward_weight, params={"term_name": "action_rate", "weight": -0.008, "num_steps": 1500000}
     )
 
 
