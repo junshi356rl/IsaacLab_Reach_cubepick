@@ -209,14 +209,12 @@ class ActionsCfg:
     arm_action: ActionTerm = mdp.JointPositionActionCfg(
         asset_name="robot",
         joint_names=["shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint", "wrist_1_joint", "wrist_2_joint", "wrist_3_joint"],
-        scale=0.5,
         use_default_offset=True,
         debug_vis=True
     )
     gripper_action: ActionTerm = mdp.JointPositionActionCfg(
         asset_name="robot",
         joint_names=["finger_joint"],
-        scale=0.2,
         use_default_offset=True,
         debug_vis=True
     )
@@ -428,7 +426,7 @@ class RewardsCfg:
     # )
     termination_penalty = RewTerm(
         func=mdp.is_terminated,
-        weight=-1.0,
+        weight=-5.0,
     )
 
 
@@ -686,6 +684,38 @@ class CurriculumCfg:
             "term_name": "cube_move_towards_command",
             "weight": 12.0,          
             "num_steps": 1600000     
+        }
+    )
+    cube_move_towards_command6 = CurrTerm(
+        func=mdp.modify_reward_weight,
+        params={
+            "term_name": "cube_move_towards_command",
+            "weight": 14.0,          
+            "num_steps": 1800000     
+        }
+    )
+    cube_move_towards_command6 = CurrTerm(
+        func=mdp.modify_reward_weight,
+        params={
+            "term_name": "cube_move_towards_command",
+            "weight": 16.0,          
+            "num_steps": 2000000     
+        }
+    )
+    cube_move_towards_command6 = CurrTerm(
+        func=mdp.modify_reward_weight,
+        params={
+            "term_name": "cube_move_towards_command",
+            "weight": 18.0,          
+            "num_steps": 2200000     
+        }
+    )
+    cube_move_towards_command6 = CurrTerm(
+        func=mdp.modify_reward_weight,
+        params={
+            "term_name": "cube_move_towards_command",
+            "weight": 200,          
+            "num_steps": 2400000     
         }
     )
     action_rate_0 = CurrTerm(
