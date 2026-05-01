@@ -380,7 +380,7 @@ class RewardsCfg:
     # Increase it in the CurriculumCfg
     cube_command_dist = RewTerm(
         func=mdp.position_command_error_tanh,
-        weight=0.0,
+        weight=2.0,
         params={
                 # "std_dist": STD_DIST_MOVE,
                 "std_dist": STD_DIST,
@@ -558,30 +558,30 @@ class CurriculumCfg:
     #     func=mdp.modify_reward_weight,
     #     params={"term_name": "finger_closure", "weight": 5.0, "num_steps": 100000}
     # )
-    contact_schedule0 = CurrTerm(
-        func=mdp.modify_reward_weight,
-        params={"term_name": "contact_grasp", "weight": 7.0, "num_steps": 500000}
-    )
-    contact_schedule1= CurrTerm(
-        func=mdp.modify_reward_weight,
-        params={"term_name": "contact_grasp", "weight": 8.0, "num_steps": 600000}
-    )
-    contact_schedule2= CurrTerm(
-        func=mdp.modify_reward_weight,
-        params={"term_name": "contact_grasp", "weight": 9.0, "num_steps": 700000}
-    )
-    contact_schedule3= CurrTerm(
-        func=mdp.modify_reward_weight,
-        params={"term_name": "contact_grasp", "weight": 10.0, "num_steps": 800000}
-    )
-    contact_schedule4= CurrTerm(
-        func=mdp.modify_reward_weight,
-        params={"term_name": "contact_grasp", "weight": 11.0, "num_steps": 900000}
-    )
-    contact_schedule5 = CurrTerm(
-        func=mdp.modify_reward_weight,
-        params={"term_name": "contact_grasp", "weight": 12.0, "num_steps": 1000000}
-    )
+    # contact_schedule0 = CurrTerm(
+    #     func=mdp.modify_reward_weight,
+    #     params={"term_name": "contact_grasp", "weight": 7.0, "num_steps": 500000}
+    # )
+    # contact_schedule1= CurrTerm(
+    #     func=mdp.modify_reward_weight,
+    #     params={"term_name": "contact_grasp", "weight": 8.0, "num_steps": 600000}
+    # )
+    # contact_schedule2= CurrTerm(
+    #     func=mdp.modify_reward_weight,
+    #     params={"term_name": "contact_grasp", "weight": 9.0, "num_steps": 700000}
+    # )
+    # contact_schedule3= CurrTerm(
+    #     func=mdp.modify_reward_weight,
+    #     params={"term_name": "contact_grasp", "weight": 10.0, "num_steps": 800000}
+    # )
+    # contact_schedule4= CurrTerm(
+    #     func=mdp.modify_reward_weight,
+    #     params={"term_name": "contact_grasp", "weight": 11.0, "num_steps": 900000}
+    # )
+    # contact_schedule5 = CurrTerm(
+    #     func=mdp.modify_reward_weight,
+    #     params={"term_name": "contact_grasp", "weight": 12.0, "num_steps": 1000000}
+    # )
     increase_move_reward0 = CurrTerm(
         func=mdp.modify_reward_weight,
         params={
@@ -630,6 +630,47 @@ class CurriculumCfg:
             "num_steps": 1500000     
         }
     )
+    # increase_move_reward6 = CurrTerm(
+    #     func=mdp.modify_reward_weight,
+    #     params={
+    #         "term_name": "cube_command_dist",
+    #         "weight": 12.0,          
+    #         "num_steps": 1700000     
+    #     }
+    # )
+    # increase_move_reward7 = CurrTerm(
+    #     func=mdp.modify_reward_weight,
+    #     params={
+    #         "term_name": "cube_command_dist",
+    #         "weight": 14.0,          
+    #         "num_steps": 1900000     
+    #     }
+    # )
+    # increase_move_reward8 = CurrTerm(
+    #     func=mdp.modify_reward_weight,
+    #     params={
+    #         "term_name": "cube_command_dist",
+    #         "weight": 16.0,          
+    #         "num_steps": 2100000     
+    #     }
+    # )
+    # increase_move_reward9 = CurrTerm(
+    #     func=mdp.modify_reward_weight,
+    #     params={
+    #         "term_name": "cube_command_dist",
+    #         "weight": 18.0,          
+    #         "num_steps": 2300000     
+    #     }
+    # )
+    # increase_move_reward10 = CurrTerm(
+    #     func=mdp.modify_reward_weight,
+    #     params={
+    #         "term_name": "cube_command_dist",
+    #         "weight": 20.0,          
+    #         "num_steps": 2500000     
+    #     }
+    # )
+
     cube_move_towards_command0 = CurrTerm(
         func=mdp.modify_reward_weight,
         params={
@@ -682,40 +723,64 @@ class CurriculumCfg:
         func=mdp.modify_reward_weight,
         params={
             "term_name": "cube_move_towards_command",
-            "weight": 12.0,          
+            "weight": 14.0,          
             "num_steps": 1600000     
         }
     )
-    cube_move_towards_command6 = CurrTerm(
-        func=mdp.modify_reward_weight,
-        params={
-            "term_name": "cube_move_towards_command",
-            "weight": 14.0,          
-            "num_steps": 1800000     
-        }
-    )
-    cube_move_towards_command6 = CurrTerm(
-        func=mdp.modify_reward_weight,
-        params={
-            "term_name": "cube_move_towards_command",
-            "weight": 16.0,          
-            "num_steps": 2000000     
-        }
-    )
-    cube_move_towards_command6 = CurrTerm(
+    cube_move_towards_command7 = CurrTerm(
         func=mdp.modify_reward_weight,
         params={
             "term_name": "cube_move_towards_command",
             "weight": 18.0,          
-            "num_steps": 2200000     
+            "num_steps": 1800000     
         }
     )
-    cube_move_towards_command6 = CurrTerm(
+    cube_move_towards_command8 = CurrTerm(
         func=mdp.modify_reward_weight,
         params={
             "term_name": "cube_move_towards_command",
-            "weight": 200,          
+            "weight": 22.0,          
+            "num_steps": 2000000     
+        }
+    )
+    cube_move_towards_command9 = CurrTerm(
+        func=mdp.modify_reward_weight,
+        params={
+            "term_name": "cube_move_towards_command",
+            "weight": 26.0,          
+            "num_steps": 2200000     
+        }
+    )
+    cube_move_towards_command10 = CurrTerm(
+        func=mdp.modify_reward_weight,
+        params={
+            "term_name": "cube_move_towards_command",
+            "weight": 30.0,          
             "num_steps": 2400000     
+        }
+    )
+    cube_move_towards_command11 = CurrTerm(
+        func=mdp.modify_reward_weight,
+        params={
+            "term_name": "cube_move_towards_command",
+            "weight": 34.0,          
+            "num_steps": 2600000     
+        }
+    )
+    cube_move_towards_command12 = CurrTerm(
+        func=mdp.modify_reward_weight,
+        params={
+            "term_name": "cube_move_towards_command",
+            "weight": 38.0,          
+            "num_steps": 2800000     
+        }
+    )
+    cube_move_towards_command13 = CurrTerm(
+        func=mdp.modify_reward_weight,
+        params={
+            "term_name": "cube_move_towards_command",
+            "weight": 40.0,          
+            "num_steps": 3000000     
         }
     )
     action_rate_0 = CurrTerm(
