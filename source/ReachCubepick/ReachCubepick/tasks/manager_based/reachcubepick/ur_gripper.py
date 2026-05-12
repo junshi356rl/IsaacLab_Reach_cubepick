@@ -24,7 +24,8 @@ EE_LINK_NAME = "ee_link"
 # FILE_NAME = "assets/UR10e-with-gripper.usd" # almost OK, but gripper shakes
 # FILE_NAME = "assets/UR10e-with-gripper-stiffness.usd"
 
-# velocity_iterations to 32, arm+elbow stiffness/damping to 2000/100, wrist stiffness/damping to 1000/100, attach friction material to finger, finger stiffness/damping to 2000/200
+# velocity_iterations to 32, arm+elbow stiffness/damping to 2000/100, wrist stiffness/damping to 1000/100, attach friction material to finger, finger stiffness/damping to 2000/50
+# natural frequency to 2500, damping ratios to 0.005 for mimic joints
 FILE_NAME = "assets/UR10e-with-gripper-stiffness2000.usd" 
 BASE_LINK_NAME = "world"
 EE_LINK_NAME = "robotiq_arg2f_base_link"

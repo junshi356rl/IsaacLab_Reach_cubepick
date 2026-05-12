@@ -29,12 +29,15 @@ from isaaclab.sim.spawners.materials import PhysicsMaterialCfg,RigidBodyMaterial
 import torch
 
 from . import mdp
+from .mdp.helper import cube_ee_relative_vel
 from ....helpers.robotiq_fingertip_center_helper import get_left_right_fingertip_gap
 
 from .ur_gripper import UR_GRIPPER_CFG, UR_PATH, BASE_LINK_NAME, EE_LINK_NAME, ROBOT_PRIM_NAME, GRIPPER_PRIM_NAME
 import isaaclab.sim.schemas
 import carb.settings
 from pxr import Usd
+from dataclasses import make_dataclass, field
+from typing import *
 
 def get_random_translation():
     x = random.uniform(0.3, 0.6)
@@ -67,6 +70,15 @@ EPISODE_LENGTH_S = 6.0
 STD_DIST = 0.15
 STD_GRASP = CUBE_LENGTH/4
 STD_DIST_MOVE = 0.04
+LEFT_FINGER_PRIM_NAME = "left_inner_finger"
+RIGHT_FINGER_PRIM_NAME = "right_inner_finger"
+LEFT_FINGER_PRIM_PATH = "{ENV_REGEX_NS}"+f"/Robot/{ROBOT_PRIM_NAME}/{GRIPPER_PRIM_NAME}/left_inner_finger"
+RIGHT_FINGER_PRIM_PATH = "{ENV_REGEX_NS}"+f"/Robot/{ROBOT_PRIM_NAME}/{GRIPPER_PRIM_NAME}/right_inner_finger"
+
+# LEFT_FINGER_PRIM_NAME = "left_inner_finger_pad"
+# RIGHT_FINGER_PRIM_NAME = "right_inner_finger_pad"
+# LEFT_FINGER_PRIM_PATH = "{ENV_REGEX_NS}"+f"/Robot/{ROBOT_PRIM_NAME}/{GRIPPER_PRIM_NAME}/left_inner_finger/{LEFT_FINGER_PRIM_NAME}"
+# RIGHT_FINGER_PRIM_PATH = "{ENV_REGEX_NS}"+f"/Robot/{ROBOT_PRIM_NAME}/{GRIPPER_PRIM_NAME}/right_inner_finger/{RIGHT_FINGER_PRIM_NAME}"
 
 @configclass
 class ReachcubepickSceneCfg(InteractiveSceneCfg):
@@ -89,13 +101,13 @@ class ReachcubepickSceneCfg(InteractiveSceneCfg):
         init_state = RigidObjectCfg.InitialStateCfg(pos=get_random_translation()),
     )
     left_finger_contact_sensor = ContactSensorCfg(
-        prim_path="{ENV_REGEX_NS}"+f"/Robot/{ROBOT_PRIM_NAME}/{GRIPPER_PRIM_NAME}/left_inner_finger",
+        prim_path=LEFT_FINGER_PRIM_PATH,
         update_period=0.01,
         history_length=3,
         filter_prim_paths_expr=["{ENV_REGEX_NS}/Cube"]
     )
     right_finger_contact_sensor = ContactSensorCfg(
-        prim_path="{ENV_REGEX_NS}"+f"/Robot/{ROBOT_PRIM_NAME}/{GRIPPER_PRIM_NAME}/right_inner_finger",
+        prim_path=RIGHT_FINGER_PRIM_PATH,
         update_period=0.01,
         history_length=3,
         filter_prim_paths_expr=["{ENV_REGEX_NS}/Cube"]
@@ -113,7 +125,11 @@ class ObservationsCfg:
         # Robot observations
         joint_pos = ObsTerm(func=mdp.joint_pos_rel)
         joint_vel = ObsTerm(func=mdp.joint_vel_rel)
-        # joint_effort = ObsTerm(func=mdp.joint_effort)
+        joint_effort = ObsTerm(func=mdp.joint_effort,
+                               params={
+                                   "asset_cfg": SceneEntityCfg("robot", joint_ids=[6])
+                                   }
+                            )
         # Action and Command
         actions = ObsTerm(func=mdp.last_action)
         
@@ -134,36 +150,36 @@ class ObservationsCfg:
         finger_line_horizontal = ObsTerm(
             func=mdp.finger_line_horizontal_obs,
             params={
-                "left_finger_cfg": SceneEntityCfg("robot", body_names=["left_inner_finger"]),
-                "right_finger_cfg": SceneEntityCfg("robot", body_names=["right_inner_finger"]),
+                "left_finger_cfg": SceneEntityCfg("robot", body_names=[LEFT_FINGER_PRIM_NAME]),
+                "right_finger_cfg": SceneEntityCfg("robot", body_names=[RIGHT_FINGER_PRIM_NAME]),
             }
         )
         env_origin = ObsTerm(func=mdp.get_env_origin)
         finger_gap_native = ObsTerm(func=mdp.inner_finger_gap_minus_cube_length_native, params={
-            "left_finger_cfg": SceneEntityCfg("robot", body_names=["left_inner_finger"]),
-            "right_finger_cfg": SceneEntityCfg("robot", body_names=["right_inner_finger"]),
+            "left_finger_cfg": SceneEntityCfg("robot", body_names=[LEFT_FINGER_PRIM_NAME]),
+            "right_finger_cfg": SceneEntityCfg("robot", body_names=[RIGHT_FINGER_PRIM_NAME]),
             "cube_length": CUBE_LENGTH
         })
         # cube_fingertip_mid_diff = ObsTerm(func=mdp.fingertip_midpoint_to_target_vector, params={
         #     "target_asset_cfg": SceneEntityCfg("cube")})
         # finger_to_cube_vel_native = ObsTerm(func=mdp.inner_finger_midpoint_vel_to_target_native, params={
-        #     "left_finger_cfg": SceneEntityCfg("robot", body_names=["left_inner_finger"]),
-        #     "right_finger_cfg": SceneEntityCfg("robot", body_names=["right_inner_finger"]),
+        #     "left_finger_cfg": SceneEntityCfg("robot", body_names=[LEFT_FINGER_PRIM_NAME]),
+        #     "right_finger_cfg": SceneEntityCfg("robot", body_names=[RIGHT_FINGER_PRIM_NAME]),
         #     "target_asset_cfg": SceneEntityCfg("cube")
         # })
         each_finger_to_target_native = ObsTerm(func=mdp.each_finger_to_target_native, params={
-            "left_finger_cfg": SceneEntityCfg("robot", body_names=["left_inner_finger"]),
-            "right_finger_cfg": SceneEntityCfg("robot", body_names=["right_inner_finger"]),
+            "left_finger_cfg": SceneEntityCfg("robot", body_names=[LEFT_FINGER_PRIM_NAME]),
+            "right_finger_cfg": SceneEntityCfg("robot", body_names=[RIGHT_FINGER_PRIM_NAME]),
             "target_asset_cfg": SceneEntityCfg("cube")
         })
         finger_midpoint_to_target_native = ObsTerm(func=mdp.finger_midpoint_to_target_native, params={
-            "left_finger_cfg": SceneEntityCfg("robot", body_names=["left_inner_finger"]),
-            "right_finger_cfg": SceneEntityCfg("robot", body_names=["right_inner_finger"]),
+            "left_finger_cfg": SceneEntityCfg("robot", body_names=[LEFT_FINGER_PRIM_NAME]),
+            "right_finger_cfg": SceneEntityCfg("robot", body_names=[RIGHT_FINGER_PRIM_NAME]),
             "target_asset_cfg": SceneEntityCfg("cube")
         })
         finger_quat_native = ObsTerm(func=mdp.finger_quat_native, params={
-            "left_finger_cfg": SceneEntityCfg("robot", body_names=["left_inner_finger"]),
-            "right_finger_cfg": SceneEntityCfg("robot", body_names=["right_inner_finger"]),
+            "left_finger_cfg": SceneEntityCfg("robot", body_names=[LEFT_FINGER_PRIM_NAME]),
+            "right_finger_cfg": SceneEntityCfg("robot", body_names=[RIGHT_FINGER_PRIM_NAME]),
         })
         left_finger_sensor_forces = ObsTerm(
             func=mdp.contact_sensor_forces,
@@ -176,8 +192,8 @@ class ObservationsCfg:
         # finger_cube_rel_vel = ObsTerm(
         #     func=mdp.inner_finger_midpoint_vel_to_target_native,
         #     params={
-        #         "left_finger_cfg": SceneEntityCfg("robot", body_names=["left_inner_finger"]),
-        #         "right_finger_cfg": SceneEntityCfg("robot", body_names=["right_inner_finger"]),
+        #         "left_finger_cfg": SceneEntityCfg("robot", body_names=[LEFT_FINGER_PRIM_NAME]),
+        #         "right_finger_cfg": SceneEntityCfg("robot", body_names=[RIGHT_FINGER_PRIM_NAME]),
         #         "target_asset_cfg": SceneEntityCfg("cube")
         #     }
         # )
@@ -196,6 +212,10 @@ class ObservationsCfg:
         #         "command_name":"move_target"
         #     }
         # )
+        cube_ee_relative_vel = ObsTerm(
+            func=cube_ee_relative_vel,
+            params={"ee_link_name": EE_LINK_NAME}
+        )
 
         def __post_init__(self):
             self.enable_corruption = True
@@ -221,7 +241,6 @@ class ActionsCfg:
     # gripper_action: ActionTerm = mdp.JointEffortActionCfg(
     #     asset_name="robot",
     #     joint_names=["finger_joint"],
-    #     scale=50.0,
     #     debug_vis=True
     # )
 
@@ -235,7 +254,7 @@ class CommandsCfg:
         ranges=mdp.UniformPoseCommandCfg.Ranges(
             pos_x=(0.6, 0.8),
             pos_y=(-0.5, -0.3),
-            pos_z=(0.1, 0.3),
+            pos_z=(CUBE_LENGTH/2, CUBE_LENGTH/2),
             roll=(0.0, 0.0),
             pitch=(0.0, 0.0),
             yaw=(0.0, 0.0),
@@ -244,48 +263,16 @@ class CommandsCfg:
 
 @configclass
 class RewardsCfg:
-    # gripper_cube_dist_reward = RewTerm(
-    #     func=mdp.gripper_target_dist_reward,
-    #     weight=3.0,
-    #     params={
-    #         'std_dist': STD_DIST,
-    #         'target_asset_cfg': SceneEntityCfg("cube"),
-    #     }
-    # )
     gripper_cube_dist = RewTerm(
         func=mdp.native_finger_midpoint_to_target_distance_reward,
         weight=5.0,
         params={
             'std_dist': STD_DIST,
-            'left_finger_cfg': SceneEntityCfg("robot", body_names=["left_inner_finger"]),
-            'right_finger_cfg': SceneEntityCfg("robot", body_names=["right_inner_finger"]),
+            'left_finger_cfg': SceneEntityCfg("robot", body_names=[LEFT_FINGER_PRIM_NAME]),
+            'right_finger_cfg': SceneEntityCfg("robot", body_names=[RIGHT_FINGER_PRIM_NAME]),
             'target_asset_cfg': SceneEntityCfg("cube"),
         }
     )
-
-    # finger_cube_orien_rel = RewTerm(
-    #     func=mdp.native_finger_grasp_reward,
-    #     weight=5.0,
-    #     params={
-    #         'std_dist': STD_DIST,
-    #         'std_grasp': STD_GRASP,
-    #         'left_finger_cfg': SceneEntityCfg("robot", body_names=["left_inner_finger"]),
-    #         'right_finger_cfg': SceneEntityCfg("robot", body_names=["right_inner_finger"]),
-    #         'target_asset_cfg': SceneEntityCfg("cube"),
-    #     }
-    # )
-
-    # finger_gap = RewTerm(
-    #     func=mdp.native_finger_gap_reward,
-    #     weight=5.0,
-    #     params={
-    #         'cube_length': CUBE_LEGNTH,
-    #         'std_dist': STD_DIST,
-    #         'left_finger_cfg': SceneEntityCfg("robot", body_names=["left_inner_finger"]),
-    #         'right_finger_cfg': SceneEntityCfg("robot", body_names=["right_inner_finger"]),
-    #         'target_asset_cfg': SceneEntityCfg("cube"),
-    #     }
-    # )
 
     finger_symmetry = RewTerm(
         func=mdp.finger_symmetry_reward,
@@ -293,8 +280,8 @@ class RewardsCfg:
         params={
             'std_grasp': STD_GRASP,
             'target_asset_cfg': SceneEntityCfg("cube"),
-            'left_finger_cfg': SceneEntityCfg("robot", body_names=["left_inner_finger"]),
-            'right_finger_cfg': SceneEntityCfg("robot", body_names=["right_inner_finger"]),
+            'left_finger_cfg': SceneEntityCfg("robot", body_names=[LEFT_FINGER_PRIM_NAME]),
+            'right_finger_cfg': SceneEntityCfg("robot", body_names=[RIGHT_FINGER_PRIM_NAME]),
         }
     )
     finger_opposition = RewTerm(
@@ -302,8 +289,8 @@ class RewardsCfg:
         weight=3.0,
         params={
             'target_asset_cfg': SceneEntityCfg("cube"),
-            'left_finger_cfg': SceneEntityCfg("robot", body_names=["left_inner_finger"]),
-            'right_finger_cfg': SceneEntityCfg("robot", body_names=["right_inner_finger"]),
+            'left_finger_cfg': SceneEntityCfg("robot", body_names=[LEFT_FINGER_PRIM_NAME]),
+            'right_finger_cfg': SceneEntityCfg("robot", body_names=[RIGHT_FINGER_PRIM_NAME]),
         }
     )
 
@@ -311,8 +298,8 @@ class RewardsCfg:
         func=mdp.finger_height_alignment_reward,
         weight=3.0,
         params={
-            'left_finger_cfg': SceneEntityCfg("robot", body_names=["left_inner_finger"]),
-            'right_finger_cfg': SceneEntityCfg("robot", body_names=["right_inner_finger"]),
+            'left_finger_cfg': SceneEntityCfg("robot", body_names=[LEFT_FINGER_PRIM_NAME]),
+            'right_finger_cfg': SceneEntityCfg("robot", body_names=[RIGHT_FINGER_PRIM_NAME]),
             'target_asset_cfg': SceneEntityCfg("cube"),
             'std_height': CUBE_LENGTH/4, 
         }
@@ -321,7 +308,7 @@ class RewardsCfg:
     contact_grasp = RewTerm(
         func=mdp.contact_grasp_reward, # increased from 0.0
         weight=5.0,
-        params={'force_scale': 10.0, "sensor1_cfg": SceneEntityCfg("left_finger_contact_sensor"), "sensor2_cfg": SceneEntityCfg("right_finger_contact_sensor")}
+        params={'force_scale': 5.0, "sensor1_cfg": SceneEntityCfg("left_finger_contact_sensor"), "sensor2_cfg": SceneEntityCfg("right_finger_contact_sensor")}
     )
     
     wrist_outside_normal_to_target = RewTerm(
@@ -337,57 +324,33 @@ class RewardsCfg:
         func=mdp.finger_line_horizontal_reward,
         weight=3.0,
         params={
-            "left_finger_cfg": SceneEntityCfg("robot", body_names=["left_inner_finger"]),
-            "right_finger_cfg": SceneEntityCfg("robot", body_names=["right_inner_finger"]),
+            "left_finger_cfg": SceneEntityCfg("robot", body_names=[LEFT_FINGER_PRIM_NAME]),
+            "right_finger_cfg": SceneEntityCfg("robot", body_names=[RIGHT_FINGER_PRIM_NAME]),
         }
     )
     finger_closure = RewTerm(
         func=mdp.finger_closure_reward,
         weight=5.0,
         params={
-            'left_finger_cfg': SceneEntityCfg("robot", body_names=["left_inner_finger"]),
-            'right_finger_cfg': SceneEntityCfg("robot", body_names=["right_inner_finger"]),
+            'left_finger_cfg': SceneEntityCfg("robot", body_names=[LEFT_FINGER_PRIM_NAME]),
+            'right_finger_cfg': SceneEntityCfg("robot", body_names=[RIGHT_FINGER_PRIM_NAME]),
             'target_width': CUBE_LENGTH,
             'activation_dist': CUBE_LENGTH*0.75,
             'std_gap': CUBE_LENGTH * 1.5
         }
     )
-    # gripper_grasp_cube_reward = RewTerm(
-    #     func=mdp.gripper_grasp_cube_reward,
-    #     weight=0.5,
-    #     params={
-    #         'std_dist': STD_DIST,
-    #         'std_grasp': 0.03,
-    #         'target_asset_cfg': SceneEntityCfg("cube"),
-    #         'dist_tolerance': DIST_TOLERANCE,
-    #         'grasp_success_threshold': 0.2,
-    #         'grasp_success_reward': 50.0,
-    #     }
-    # )
-    # finger_gap_reward = RewTerm(
-    #     func=mdp.finger_gap_reward,
-    #     weight=1.0,
-    #     params={
-    #         'cube_length': CUBE_LEGNTH,
-    #         'gap_far_offset': 0.06,
-    #         'gap_near_offset': -0.005, 
-    #         'gap_std': 0.03,
-    #         'dist_far': 0.20,
-    #         'dist_near': 0.05,
-    #     }
-    # )
 
     # Increase it in the CurriculumCfg
     cube_command_dist = RewTerm(
         func=mdp.position_command_error_tanh,
-        weight=2.0,
+        weight=0.0,
         params={
                 # "std_dist": STD_DIST_MOVE,
                 "std_dist": STD_DIST,
                 "asset_cfg": SceneEntityCfg("cube"),
                 "command_name": "move_target",
-                'left_finger_cfg': SceneEntityCfg("robot", body_names=["left_inner_finger"]),
-                'right_finger_cfg': SceneEntityCfg("robot", body_names=["right_inner_finger"]),
+                'left_finger_cfg': SceneEntityCfg("robot", body_names=[LEFT_FINGER_PRIM_NAME]),
+                'right_finger_cfg': SceneEntityCfg("robot", body_names=[RIGHT_FINGER_PRIM_NAME]),
                 }
     )
     cube_move_towards_command = RewTerm(
@@ -404,26 +367,19 @@ class RewardsCfg:
         func=mdp.action_rate_l2, 
         weight=-0.001
     )
+    
     joint_vel = RewTerm(
         func=mdp.joint_vel_l2,
         weight=-0.01,
         params={
             "asset_cfg": SceneEntityCfg("robot")}, # exclude mimic joints
     )
-    # joint_vel = RewTerm(
-    #     func=mdp.joint_vel_l2,
-    #     weight=-0.01,
-    #     params={
-    #         "asset_cfg": SceneEntityCfg("robot",
-    #                                     joint_ids=[0, 1, 2, 3, 4, 5, 6])}, # exclude mimic joints
-    # )
-    # gripper_effort_penalty = RewTerm(
-    #     func=mdp.joint_torques_l2,
-    #     weight=-0.001,
-    #     params={
-    #         "asset_cfg": SceneEntityCfg("robot", joint_ids=[6])
-    #     }
-    # )
+    anti_slip_penalty = RewTerm(
+        func=mdp.finger_slip_penalty, # -||cube_vel - ee_vel||_2
+        params={"ee_link_name": EE_LINK_NAME},
+        weight=2.0,
+    )
+    
     termination_penalty = RewTerm(
         func=mdp.is_terminated,
         weight=-5.0,
@@ -517,282 +473,53 @@ class EventCfg:
         },
     )
 
-# def override_param(env, env_ids, data, value, num_steps):
-#     cur_step = env.unwrapped.common_step_counter
-#     # find the first num_steps smaller than cur_step and get the corresponding value
-#     updated = False
-#     for idx, step in enumerate(num_steps):
-#         if cur_step >= step:
-#             new_value = value[idx]
-#             updated = True
-#         else:
-#             break
-#     if updated:
-#         return new_value
-#     return mdp.modify_term_cfg.NO_CHANGE
 
-@configclass
-class CurriculumCfg:
-    """Curriculum terms for the MDP"""
-    # action_rate = CurrTerm(
-    #     func=mdp.modify_reward_weight, params={"term_name": "action_rate", "weight": -0.005, "num_steps": 150000}
-    # )
-    # grasp_weight_increase = CurrTerm(
-    #     func=mdp.modify_reward_weight,
-    #     params={"term_name": "gripper_grasp_cube_reward", "weight": 1.5, "num_steps": 100000}
-    # )
-    # grasp_weight_final = CurrTerm(
-    #     func=mdp.modify_reward_weight,
-    #     params={"term_name": "gripper_grasp_cube_reward", "weight": 2.0, "num_steps": 300000}
-    # )
 
-    # tighten_threshold = CurrTerm(
-    #     func=mdp.modify_term_cfg,
-    #     params={
-    #         "address": "rewards.gripper_grasp_cube_reward.params.grasp_success_threshold",
-    #         "modify_params": {"value": [0.4, 0.5], "num_steps": [200000, 300000]},
-    #         "modify_fn": override_param,
-    #     }
-    # )
-    # closure_schedule = CurrTerm(
-    #     func=mdp.modify_reward_weight,
-    #     params={"term_name": "finger_closure", "weight": 5.0, "num_steps": 100000}
-    # )
-    # contact_schedule0 = CurrTerm(
-    #     func=mdp.modify_reward_weight,
-    #     params={"term_name": "contact_grasp", "weight": 7.0, "num_steps": 500000}
-    # )
-    # contact_schedule1= CurrTerm(
-    #     func=mdp.modify_reward_weight,
-    #     params={"term_name": "contact_grasp", "weight": 8.0, "num_steps": 600000}
-    # )
-    # contact_schedule2= CurrTerm(
-    #     func=mdp.modify_reward_weight,
-    #     params={"term_name": "contact_grasp", "weight": 9.0, "num_steps": 700000}
-    # )
-    # contact_schedule3= CurrTerm(
-    #     func=mdp.modify_reward_weight,
-    #     params={"term_name": "contact_grasp", "weight": 10.0, "num_steps": 800000}
-    # )
-    # contact_schedule4= CurrTerm(
-    #     func=mdp.modify_reward_weight,
-    #     params={"term_name": "contact_grasp", "weight": 11.0, "num_steps": 900000}
-    # )
-    # contact_schedule5 = CurrTerm(
-    #     func=mdp.modify_reward_weight,
-    #     params={"term_name": "contact_grasp", "weight": 12.0, "num_steps": 1000000}
-    # )
-    increase_move_reward0 = CurrTerm(
-        func=mdp.modify_reward_weight,
-        params={
-            "term_name": "cube_command_dist",
-            "weight": 1.0,          
-            "num_steps": 500000
-        }
-    )
-    increase_move_reward1 = CurrTerm(
-        func=mdp.modify_reward_weight,
-        params={
-            "term_name": "cube_command_dist",
-            "weight": 3.0,          
-            "num_steps": 650000     
-        }
-    )
-    increase_move_reward2 = CurrTerm(
-        func=mdp.modify_reward_weight,
-        params={
-            "term_name": "cube_command_dist",
-            "weight": 5.0,          
-            "num_steps": 800000     
-        }
-    )
-    increase_move_reward3 = CurrTerm(
-        func=mdp.modify_reward_weight,
-        params={
-            "term_name": "cube_command_dist",
-            "weight": 7.0,          
-            "num_steps": 1000000     
-        }
-    )
-    increase_move_reward4 = CurrTerm(
-        func=mdp.modify_reward_weight,
-        params={
-            "term_name": "cube_command_dist",
-            "weight": 8.0,          
-            "num_steps": 1200000     
-        }
-    )
-    increase_move_reward5 = CurrTerm(
-        func=mdp.modify_reward_weight,
-        params={
-            "term_name": "cube_command_dist",
-            "weight": 10.0,          
-            "num_steps": 1500000     
-        }
-    )
-    # increase_move_reward6 = CurrTerm(
-    #     func=mdp.modify_reward_weight,
-    #     params={
-    #         "term_name": "cube_command_dist",
-    #         "weight": 12.0,          
-    #         "num_steps": 1700000     
-    #     }
-    # )
-    # increase_move_reward7 = CurrTerm(
-    #     func=mdp.modify_reward_weight,
-    #     params={
-    #         "term_name": "cube_command_dist",
-    #         "weight": 14.0,          
-    #         "num_steps": 1900000     
-    #     }
-    # )
-    # increase_move_reward8 = CurrTerm(
-    #     func=mdp.modify_reward_weight,
-    #     params={
-    #         "term_name": "cube_command_dist",
-    #         "weight": 16.0,          
-    #         "num_steps": 2100000     
-    #     }
-    # )
-    # increase_move_reward9 = CurrTerm(
-    #     func=mdp.modify_reward_weight,
-    #     params={
-    #         "term_name": "cube_command_dist",
-    #         "weight": 18.0,          
-    #         "num_steps": 2300000     
-    #     }
-    # )
-    # increase_move_reward10 = CurrTerm(
-    #     func=mdp.modify_reward_weight,
-    #     params={
-    #         "term_name": "cube_command_dist",
-    #         "weight": 20.0,          
-    #         "num_steps": 2500000     
-    #     }
-    # )
 
-    cube_move_towards_command0 = CurrTerm(
-        func=mdp.modify_reward_weight,
-        params={
-            "term_name": "cube_move_towards_command",
-            "weight": 1.0,          
-            "num_steps": 500000
-        }
-    )
-    cube_move_towards_command1 = CurrTerm(
-        func=mdp.modify_reward_weight,
-        params={
-            "term_name": "cube_move_towards_command",
-            "weight": 3.0,          
-            "num_steps": 650000     
-        }
-    )
-    cube_move_towards_command2 = CurrTerm(
-        func=mdp.modify_reward_weight,
-        params={
-            "term_name": "cube_move_towards_command",
-            "weight": 5.0,          
-            "num_steps": 800000     
-        }
-    )
-    cube_move_towards_command3 = CurrTerm(
-        func=mdp.modify_reward_weight,
-        params={
-            "term_name": "cube_move_towards_command",
-            "weight": 7.0,          
-            "num_steps": 1000000     
-        }
-    )
-    cube_move_towards_command4 = CurrTerm(
-        func=mdp.modify_reward_weight,
-        params={
-            "term_name": "cube_move_towards_command",
-            "weight": 8.0,          
-            "num_steps": 1200000     
-        }
-    )
-    cube_move_towards_command5 = CurrTerm(
-        func=mdp.modify_reward_weight,
-        params={
-            "term_name": "cube_move_towards_command",
-            "weight": 10.0,          
-            "num_steps": 1400000     
-        }
-    )
-    cube_move_towards_command6 = CurrTerm(
-        func=mdp.modify_reward_weight,
-        params={
-            "term_name": "cube_move_towards_command",
-            "weight": 14.0,          
-            "num_steps": 1600000     
-        }
-    )
-    cube_move_towards_command7 = CurrTerm(
-        func=mdp.modify_reward_weight,
-        params={
-            "term_name": "cube_move_towards_command",
-            "weight": 18.0,          
-            "num_steps": 1800000     
-        }
-    )
-    cube_move_towards_command8 = CurrTerm(
-        func=mdp.modify_reward_weight,
-        params={
-            "term_name": "cube_move_towards_command",
-            "weight": 22.0,          
-            "num_steps": 2000000     
-        }
-    )
-    cube_move_towards_command9 = CurrTerm(
-        func=mdp.modify_reward_weight,
-        params={
-            "term_name": "cube_move_towards_command",
-            "weight": 26.0,          
-            "num_steps": 2200000     
-        }
-    )
-    cube_move_towards_command10 = CurrTerm(
-        func=mdp.modify_reward_weight,
-        params={
-            "term_name": "cube_move_towards_command",
-            "weight": 30.0,          
-            "num_steps": 2400000     
-        }
-    )
-    cube_move_towards_command11 = CurrTerm(
-        func=mdp.modify_reward_weight,
-        params={
-            "term_name": "cube_move_towards_command",
-            "weight": 34.0,          
-            "num_steps": 2600000     
-        }
-    )
-    cube_move_towards_command12 = CurrTerm(
-        func=mdp.modify_reward_weight,
-        params={
-            "term_name": "cube_move_towards_command",
-            "weight": 38.0,          
-            "num_steps": 2800000     
-        }
-    )
-    cube_move_towards_command13 = CurrTerm(
-        func=mdp.modify_reward_weight,
-        params={
-            "term_name": "cube_move_towards_command",
-            "weight": 40.0,          
-            "num_steps": 3000000     
-        }
-    )
-    action_rate_0 = CurrTerm(
-        func=mdp.modify_reward_weight, params={"term_name": "action_rate", "weight": -0.003, "num_steps": 300000}
-    )
-    action_rate_1 = CurrTerm(
-        func=mdp.modify_reward_weight, params={"term_name": "action_rate", "weight": -0.006, "num_steps": 1000000}
-    )
-    action_rate_2 = CurrTerm(
-        func=mdp.modify_reward_weight, params={"term_name": "action_rate", "weight": -0.008, "num_steps": 1500000}
-    )
+def build_curriculum_terms(term_name: str, weights: List[float], num_steps: List[int]) -> Dict[str, CurrTerm]:
+    if len(weights) != len(num_steps):
+        raise ValueError(f"Length mismatch for {term_name}")
+    
+    terms = {}
+    for i, (steps, weight) in enumerate(sorted(zip(num_steps, weights), key=lambda x: x[0])):
+        terms[f"{term_name}_{i}"] = CurrTerm(
+            func=mdp.modify_reward_weight,
+            params={"term_name": term_name, "weight": weight, "num_steps": steps}
+        )
+    return terms
 
+
+def create_curriculum_cfg(terms_dict: Dict[str, CurrTerm]) -> type:
+    def _make_factory(v):
+        return lambda: v
+    
+    fields = [
+        (name, CurrTerm, field(default_factory=_make_factory(value)))
+        for name, value in terms_dict.items()
+    ]
+    return configclass(make_dataclass("CurriculumCfg", fields))
+
+
+_curriculum_terms = {
+    **build_curriculum_terms("contact_grasp", 
+        weights=[7.0, 9.0, 11.0, 13.0, 15.0, 17.0, 19.0, 21.0, 23.0, 25.0],
+        num_steps=[150000, 200000, 250000, 300000, 350000, 400000, 450000, 550000, 650000, 750000]
+    ),
+    **build_curriculum_terms("cube_command_dist", 
+        weights=[1.0, 3.0, 5.0, 7.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0],
+        num_steps=[550000, 600000, 700000, 800000, 900000, 1000000, 1100000, 1200000, 1300000, 1400000, 1500000]
+    ),
+    **build_curriculum_terms("cube_move_towards_command", 
+        weights=[1.0, 3.0, 5.0, 7.0, 8.0, 10.0, 12.0, 16.0, 20.0, 24.0, 28.0],
+        num_steps=[600000, 650000, 750000, 850000, 950000, 1050000, 1150000, 1250000, 1350000, 1450000, 1550000]
+    ),
+    **build_curriculum_terms("action_rate", 
+        weights=[-0.003, -0.006, -0.008],
+        num_steps=[500000, 950000, 1550000]
+    )
+}
+
+CurriculumCfg = create_curriculum_cfg(_curriculum_terms)
 
 
 ##
@@ -805,6 +532,7 @@ class ReachcubepickEnvCfg(ManagerBasedRLEnvCfg):
     # Scene settings
     scene: ReachcubepickSceneCfg = ReachcubepickSceneCfg(num_envs=1000, env_spacing=ENV_SPACING)
     observations = ObservationsCfg()
+
     actions = ActionsCfg()
     commands: CommandsCfg = CommandsCfg()
     rewards = RewardsCfg()

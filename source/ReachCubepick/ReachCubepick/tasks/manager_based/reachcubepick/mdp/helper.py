@@ -7,6 +7,7 @@ from isaaclab.managers import SceneEntityCfg
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
+PAD_OFFSET = (0.0, 0.045755401253700256, -0.027220344170928)
 
 def get_finger_axis(
     env: "ManagerBasedRLEnv",
@@ -23,12 +24,12 @@ def get_finger_axis(
     left_body_id = left_finger_asset.find_bodies(left_finger_cfg.body_names[0])[0]
     right_body_id = right_finger_asset.find_bodies(right_finger_cfg.body_names[0])[0]
 
-    left_pos = left_finger_asset.data.body_state_w[:, left_body_id, :3].squeeze()
-    right_pos = right_finger_asset.data.body_state_w[:, right_body_id, :3].squeeze()
+    left_pad_pos_w = get_offset_body_pos_w(left_finger_asset, left_finger_cfg.body_names[0], PAD_OFFSET)
+    right_pad_pos_w = get_offset_body_pos_w(right_finger_asset, right_finger_cfg.body_names[0], PAD_OFFSET)
 
-    finger_axis = (right_pos - left_pos).squeeze()
+    finger_axis = (right_pad_pos_w - left_pad_pos_w).squeeze()
 
-    return left_pos, finger_axis
+    return left_pad_pos_w, finger_axis
 
 def get_to_target(env: "ManagerBasedRLEnv",
     left_finger_cfg,
@@ -42,13 +43,10 @@ def get_to_target(env: "ManagerBasedRLEnv",
     left_finger_asset = env.scene[left_finger_cfg.name]
     right_finger_asset = env.scene[right_finger_cfg.name]
 
-    left_body_id = left_finger_asset.find_bodies(left_finger_cfg.body_names[0])[0]
-    right_body_id = right_finger_asset.find_bodies(right_finger_cfg.body_names[0])[0]
+    left_pad_pos_w = get_offset_body_pos_w(left_finger_asset, left_finger_cfg.body_names[0], PAD_OFFSET)
+    right_pad_pos_w = get_offset_body_pos_w(right_finger_asset, right_finger_cfg.body_names[0], PAD_OFFSET)
 
-    left_pos = left_finger_asset.data.body_state_w[:, left_body_id, :3].squeeze()
-    right_pos = right_finger_asset.data.body_state_w[:, right_body_id, :3].squeeze()
-
-    mid_point = (left_pos + right_pos) / 2
+    mid_point = (left_pad_pos_w + right_pad_pos_w) / 2
     target_asset = env.scene[target_asset_cfg.name]
     target_pos = target_asset.data.body_state_w[:, 0, :3]
     to_target = target_pos - mid_point
@@ -146,6 +144,24 @@ def wrist_outside_normal_to_target(
     return dot_product
 
 
+def get_offset_body_pos_w(
+    asset,
+    body_name: str,
+    local_offset: tuple[float, float, float] | torch.Tensor,
+) -> torch.Tensor:
+    body_idx = asset.find_bodies(body_name)[0]
+    if isinstance(body_idx, list):
+        body_idx = body_idx[0]
+
+    pos_w = asset.data.body_pos_w[:, body_idx, :3].squeeze(1)
+    quat_w = asset.data.body_quat_w[:, body_idx, :].squeeze(1)
+
+    offset_tensor = torch.as_tensor(local_offset, device=pos_w.device)
+    if offset_tensor.ndim == 1:
+        offset_tensor = offset_tensor.unsqueeze(0).expand(pos_w.shape[0], -1)
+
+    return pos_w + quat_apply(quat_w, offset_tensor)
+
 def get_finger_line_horizontal_info(
     env: "ManagerBasedRLEnv",
     left_finger_cfg: SceneEntityCfg,
@@ -156,11 +172,11 @@ def get_finger_line_horizontal_info(
     
     left_body_id = left_finger_asset.find_bodies(left_finger_cfg.body_names[0])[0]
     right_body_id = right_finger_asset.find_bodies(right_finger_cfg.body_names[0])[0]
-    
-    left_pos_w = left_finger_asset.data.body_pos_w[:, left_body_id, :3].squeeze(1)
-    right_pos_w = right_finger_asset.data.body_pos_w[:, right_body_id, :3].squeeze(1)
-    
-    line_vector = right_pos_w - left_pos_w
+
+    left_pad_pos_w = get_offset_body_pos_w(left_finger_asset, left_finger_cfg.body_names[0], PAD_OFFSET)
+    right_pad_pos_w = get_offset_body_pos_w(right_finger_asset, right_finger_cfg.body_names[0], PAD_OFFSET)
+
+    line_vector = right_pad_pos_w - left_pad_pos_w
     line_vector_norm = normalize(line_vector)
     
     z_component = torch.abs(line_vector_norm[:, 2])
@@ -179,3 +195,11 @@ def get_finger_line_horizontal_info(
         "angle_deg": angle_deg,
         "angle_rad": angle_rad,
     }
+
+
+def cube_ee_relative_vel(env, ee_link_name: str) -> torch.Tensor:
+    """Compute relative velocity between cube and end-effector (cube_vel - ee_vel)."""
+    cube_vel = env.scene["cube"].data.root_vel_w[:, :3]
+    ee_body_id = env.scene["robot"].find_bodies(ee_link_name)[0]
+    ee_vel = env.scene["robot"].data.body_vel_w[:, ee_body_id, :3].squeeze(1)
+    return cube_vel - ee_vel
