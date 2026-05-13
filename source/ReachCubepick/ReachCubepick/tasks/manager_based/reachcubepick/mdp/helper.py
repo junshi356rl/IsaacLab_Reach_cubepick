@@ -202,4 +202,10 @@ def cube_ee_relative_vel(env, ee_link_name: str) -> torch.Tensor:
     cube_vel = env.scene["cube"].data.root_vel_w[:, :3]
     ee_body_id = env.scene["robot"].find_bodies(ee_link_name)[0]
     ee_vel = env.scene["robot"].data.body_vel_w[:, ee_body_id, :3].squeeze(1)
-    return cube_vel - ee_vel
+    rel_vel = cube_vel - ee_vel
+    if env.unwrapped.common_step_counter % 10000 == 0:
+        print(f"[DEBUG] cube_ee_relative_vel | Step {env.unwrapped.common_step_counter} | "
+              f"mean_abs: {rel_vel.abs().mean(dim=1).mean().item():.4f}, "
+              f"max_abs: {rel_vel.abs().max(dim=1)[0].max().item():.4f}, "
+              f"std: {rel_vel.std(dim=1).mean().item():.4f}")
+    return rel_vel

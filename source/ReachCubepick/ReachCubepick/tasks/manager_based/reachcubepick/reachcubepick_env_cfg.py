@@ -375,9 +375,15 @@ class RewardsCfg:
             "asset_cfg": SceneEntityCfg("robot")}, # exclude mimic joints
     )
     anti_slip_penalty = RewTerm(
-        func=mdp.finger_slip_penalty, # -||cube_vel - ee_vel||_2
-        params={"ee_link_name": EE_LINK_NAME},
-        weight=2.0,
+        func=mdp.finger_slip_penalty,
+        params={
+            "ee_link_name": EE_LINK_NAME,
+            "sensor1_cfg": SceneEntityCfg("left_finger_contact_sensor"),
+            "sensor2_cfg": SceneEntityCfg("right_finger_contact_sensor"),
+            "slip_vel_threshold": 0.04,
+            "grasp_force_threshold": 1.5
+        },
+        weight=1.5,
     )
     
     termination_penalty = RewTerm(

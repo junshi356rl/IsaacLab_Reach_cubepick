@@ -297,9 +297,40 @@ def finger_height_alignment_reward(
     
     return reward
 
-def finger_slip_penalty(env, ee_link_name:str):
-    return -1.0 * torch.norm(cube_ee_relative_vel(env, ee_link_name), dim=1)
+def finger_slip_penalty(
+    env: ManagerBasedRLEnv,
+    ee_link_name: str,
+    sensor1_cfg: SceneEntityCfg,
+    sensor2_cfg: SceneEntityCfg,
+    slip_vel_threshold: float = 0.04,
+    grasp_force_threshold: float = 1.5,
+) -> torch.Tensor:
+    """Compute slip penalty: -max(0, ||v_cube - v_ee|| - threshold) * is_grasping.
+    
+    Only penalizes relative motion when the gripper is firmly holding the object,
+    and ignores small relative velocities within the tolerance band.
+    """
+    # 1. Relative velocity magnitude
+    rel_vel = cube_ee_relative_vel(env, ee_link_name)
+    rel_speed = torch.norm(rel_vel, dim=1)
 
+    # 2. Contact forces for grasp detection
+    s1 = env.scene[sensor1_cfg.name]
+    s2 = env.scene[sensor2_cfg.name]
+
+    # Squeeze to (N, 3) and compute magnitude
+    f1 = torch.norm(s1.data.force_matrix_w.squeeze(dim=(1, 2)), dim=-1)
+    f2 = torch.norm(s2.data.force_matrix_w.squeeze(dim=(1, 2)), dim=-1)
+
+    # Bilateral force indicates stable grasp
+    bilateral_force = torch.minimum(f1, f2)
+    is_grasping = (bilateral_force > grasp_force_threshold).float()
+
+    # 3. Tolerance band: ignore controlled movement / acceleration transients
+    excess_slip = torch.clamp(rel_speed - slip_vel_threshold, min=0.0)
+
+    # Return penalty (negative value)
+    return -excess_slip * is_grasping
 
 # def native_finger_grasp_reward(env: ManagerBasedRLEnv, std_dist, std_grasp, left_finger_cfg, right_finger_cfg, target_asset_cfg) -> torch.Tensor:
 #     target_asset: RigidObject = env.scene[target_asset_cfg.name]

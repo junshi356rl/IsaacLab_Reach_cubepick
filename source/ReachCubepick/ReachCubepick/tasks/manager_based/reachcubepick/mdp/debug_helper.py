@@ -104,6 +104,55 @@ def debug_robot_state(
         print(f"[ROBOT STATE DEBUG STATS] Step {step_count}: No velocity violations detected. Max Arm Vel={arm_max_vals.max():.2f}, Max Grip Vel={gripper_max_vals.max():.2f}")
 
 
+def debug_robot_joint_acc(env, thres_acc=3.0, report_top_k: int = 5, print_freq_stats: int = 1000):
+    step_count = env.unwrapped.common_step_counter
+    if step_count % print_freq_stats != 0:
+        return
+
+    robot = env.scene["robot"]
+    joint_acc = robot.data.joint_acc
+    joint_names = robot.joint_names
+    abs_acc = torch.abs(joint_acc)
+
+    violating_acc = abs_acc > thres_acc
+    any_violation = violating_acc.any(dim=1)
+    violation_count = int(torch.sum(any_violation).item())
+
+    if violation_count > 0:
+        print(f"{'='*62}\n")
+        print(f"[ROBOT ACC DEBUG] Step {step_count}: Detected {violating_acc.sum().item()} joints with high acceleration (> {thres_acc} rad/s²)")
+
+        # Rank violating environments by their max absolute joint acceleration
+        max_acc_vals, _ = torch.max(abs_acc, dim=1)  # (N,)
+        violation_ids = torch.nonzero(any_violation, as_tuple=True)[0].cpu()
+        if violation_ids.numel() == 0:
+            return
+
+        viol_vals = max_acc_vals[violation_ids].cpu()
+        sorted_idx = torch.argsort(viol_vals, descending=True)
+        top_ids = violation_ids[sorted_idx][:report_top_k].tolist()
+
+        print(f"Total Violating Envs: {violation_count} / {env.num_envs}")
+        print(f"Threshold Acc -> {thres_acc} rad/s² | Reporting Top {min(report_top_k, len(top_ids))} Envs")
+
+        for env_id in top_ids:
+            env_id = int(env_id)
+            env_violations = torch.nonzero(violating_acc[env_id], as_tuple=True)[0]
+            reasons = []
+            for idx in env_violations:
+                idx = int(idx)
+                acc_val = float(abs_acc[env_id, idx])
+                joint_name = joint_names[idx]
+                reasons.append(f"'{joint_name}'(Idx:{idx})={acc_val:.2f} rad/s²")
+
+            print(f"  Env [{env_id:3d}]: " + " | ".join(reasons))
+
+        if violation_count > report_top_k:
+            print(f"  ... and {violation_count - report_top_k} more environments hidden.")
+    else:
+        print(f"[ROBOT ACC DEBUG] Step {step_count}: No joint acceleration violations detected. Max Acc={max_acc_vals.max():.2f} rad/s²")
+
+
 def debug_cube_move_state(env, distance_tensor, distance_reward, print_freq_stats):
     step_count = env.unwrapped.common_step_counter
     # print mean and max of cube distance
