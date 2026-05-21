@@ -2,8 +2,8 @@ import torch
 
 def debug_robot_state(
     env, 
-    threshold_arm: float = 5.0,      
-    threshold_gripper: float = 2.0,  
+    threshold_arm: float = 10.0,      
+    threshold_gripper: float = 10.0,  
     report_top_k: int = 5,           
     print_freq_stats: int = 1000    
 ):
@@ -48,7 +48,7 @@ def debug_robot_state(
         
         ids_to_report = violation_ids[:report_top_k]
         
-        print(f"[TERMINATION DEBUG] Step {step_count}")
+        print(f"[Velocity DEBUG] Step {step_count}")
         print(f"Total Violating Envs: {violation_count} / {env.num_envs}")
         print(f"Thresholds -> Arm: {threshold_arm} rad/s, Gripper: {threshold_gripper} rad/s")
         

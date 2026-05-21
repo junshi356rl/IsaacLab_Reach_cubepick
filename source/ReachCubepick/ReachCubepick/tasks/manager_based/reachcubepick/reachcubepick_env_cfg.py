@@ -139,7 +139,7 @@ class ObservationsCfg:
         cube_vel = ObsTerm(func=mdp.get_asset_vel, params={"asset_cfg": SceneEntityCfg("cube")})
         
         ee_pos = ObsTerm(func=mdp.body_pose_w, params={"asset_cfg": SceneEntityCfg("robot", body_names=[EE_LINK_NAME])})
-        # ee_vel = ObsTerm(func=mdp.get_body_vel, params={"body_cfg": SceneEntityCfg("robot", body_names=[EE_LINK_NAME])})
+        ee_vel = ObsTerm(func=mdp.get_body_vel, params={"body_cfg": SceneEntityCfg("robot", body_names=[EE_LINK_NAME])})
         gripper_y_axis_approach = ObsTerm(
                 func=mdp.wrist_outside_normal_to_target_rad,
                 params={
@@ -205,13 +205,13 @@ class ObservationsCfg:
                 "command_name":"move_target"
             }
         )
-        # cube_velocity_alignment = ObsTerm(
-        #     func=mdp.get_cube_velocity_alignment,
-        #     params={
-        #         "asset_cfg":SceneEntityCfg("cube"),
-        #         "command_name":"move_target"
-        #     }
-        # )
+        cube_velocity_alignment = ObsTerm(
+            func=mdp.get_cube_velocity_alignment,
+            params={
+                "asset_cfg":SceneEntityCfg("cube"),
+                "command_name":"move_target"
+            }
+        )
         cube_ee_relative_vel = ObsTerm(
             func=cube_ee_relative_vel,
             params={"ee_link_name": EE_LINK_NAME}
@@ -341,18 +341,31 @@ class RewardsCfg:
     )
 
     # Increase it in the CurriculumCfg
+    # cube_command_dist = RewTerm(
+    #     func=mdp.position_command_error_tanh,
+    #     weight=0.0,
+    #     params={
+    #             # "std_dist": STD_DIST_MOVE,
+    #             "std_dist": STD_DIST,
+    #             "asset_cfg": SceneEntityCfg("cube"),
+    #             "command_name": "move_target",
+    #             'left_finger_cfg': SceneEntityCfg("robot", body_names=[LEFT_FINGER_PRIM_NAME]),
+    #             'right_finger_cfg': SceneEntityCfg("robot", body_names=[RIGHT_FINGER_PRIM_NAME]),
+    #             }
+    # )
     cube_command_dist = RewTerm(
-        func=mdp.position_command_error_tanh,
+        func=mdp.position_command_error_progress,
         weight=0.0,
         params={
-                # "std_dist": STD_DIST_MOVE,
-                "std_dist": STD_DIST,
-                "asset_cfg": SceneEntityCfg("cube"),
-                "command_name": "move_target",
-                'left_finger_cfg': SceneEntityCfg("robot", body_names=[LEFT_FINGER_PRIM_NAME]),
-                'right_finger_cfg': SceneEntityCfg("robot", body_names=[RIGHT_FINGER_PRIM_NAME]),
-                }
+            "max_track_dist": 1.2,
+            "dist_sigma": 0.12,
+            "asset_cfg": SceneEntityCfg("cube"),
+            "command_name": "move_target",
+            "sensor1_cfg": SceneEntityCfg("left_finger_contact_sensor"),
+            "sensor2_cfg": SceneEntityCfg("right_finger_contact_sensor"),
+        }
     )
+
     cube_move_towards_command = RewTerm(
         func=mdp.asset_vel_to_command,
         weight=0.0,
@@ -363,9 +376,15 @@ class RewardsCfg:
                 }
     )
 
+    # joint_limit_avoidance = RewTerm(
+    #     func=mdp.joint_limit_distance_clamped,
+    #     weight=-0.5, 
+    #     params={"asset_cfg": SceneEntityCfg("robot"), "margin": 0.15}
+    # )
+
     action_rate = RewTerm(
         func=mdp.action_rate_l2, 
-        weight=-0.001
+        weight=-0.0001
     )
     
     joint_vel = RewTerm(
@@ -374,17 +393,17 @@ class RewardsCfg:
         params={
             "asset_cfg": SceneEntityCfg("robot")}, # exclude mimic joints
     )
-    anti_slip_penalty = RewTerm(
-        func=mdp.finger_slip_penalty,
-        params={
-            "ee_link_name": EE_LINK_NAME,
-            "sensor1_cfg": SceneEntityCfg("left_finger_contact_sensor"),
-            "sensor2_cfg": SceneEntityCfg("right_finger_contact_sensor"),
-            "slip_vel_threshold": 0.04,
-            "grasp_force_threshold": 1.5
-        },
-        weight=1.5,
-    )
+    # anti_slip_penalty = RewTerm(
+    #     func=mdp.finger_slip_penalty,
+    #     params={
+    #         "ee_link_name": EE_LINK_NAME,
+    #         "sensor1_cfg": SceneEntityCfg("left_finger_contact_sensor"),
+    #         "sensor2_cfg": SceneEntityCfg("right_finger_contact_sensor"),
+    #         "slip_vel_threshold": 0.04,
+    #         "grasp_force_threshold": 1.5
+    #     },
+    #     weight=1.5,
+    # )
     
     termination_penalty = RewTerm(
         func=mdp.is_terminated,
@@ -441,7 +460,8 @@ class TerminationsCfg:
         func=joint_vel_too_high, 
         params={
             "threshold": 10.0,
-            "asset_cfg": SceneEntityCfg("robot", joint_ids=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
+            # "asset_cfg": SceneEntityCfg("robot", joint_ids=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
+            "asset_cfg": SceneEntityCfg("robot", joint_ids=[0, 1, 2, 3, 4, 5])
         }
     )
     cube_too_far = DoneTerm(
@@ -508,21 +528,21 @@ def create_curriculum_cfg(terms_dict: Dict[str, CurrTerm]) -> type:
 
 _curriculum_terms = {
     **build_curriculum_terms("contact_grasp", 
-        weights=[7.0, 9.0, 11.0, 13.0, 15.0, 17.0, 19.0, 21.0, 23.0, 25.0],
+        weights=[7.0, 9.0, 11.0, 13.0, 15.0, 17.0, 15.0, 13.0, 11.0, 9.0],
         num_steps=[150000, 200000, 250000, 300000, 350000, 400000, 450000, 550000, 650000, 750000]
     ),
     **build_curriculum_terms("cube_command_dist", 
-        weights=[1.0, 3.0, 5.0, 7.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0],
-        num_steps=[550000, 600000, 700000, 800000, 900000, 1000000, 1100000, 1200000, 1300000, 1400000, 1500000]
+        weights=[0.0, 1.0, 3.0, 5.0, 7.0, 9.0, 11.0, 13.0, 15.0, 17.0, 19.0, 21.0, 23.0, 25.0],
+        num_steps=[0, 200000, 350000, 500000, 650000, 800000, 1000000, 1200000, 1400000, 1600000, 1800000, 2000000, 2200000, 2400000]
     ),
     **build_curriculum_terms("cube_move_towards_command", 
-        weights=[1.0, 3.0, 5.0, 7.0, 8.0, 10.0, 12.0, 16.0, 20.0, 24.0, 28.0],
-        num_steps=[600000, 650000, 750000, 850000, 950000, 1050000, 1150000, 1250000, 1350000, 1450000, 1550000]
+        weights=[0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0],
+        num_steps=[0, 300000, 500000, 700000, 900000, 1100000, 1500000]
     ),
-    **build_curriculum_terms("action_rate", 
-        weights=[-0.003, -0.006, -0.008],
-        num_steps=[500000, 950000, 1550000]
-    )
+    # **build_curriculum_terms("action_rate", 
+    #     weights=[-0.0002, -0.00015, -0.0001, -0.00005],
+    #     num_steps=[0, 300000, 600000, 1000000]
+    # )
 }
 
 CurriculumCfg = create_curriculum_cfg(_curriculum_terms)

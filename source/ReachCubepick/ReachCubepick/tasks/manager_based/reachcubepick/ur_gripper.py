@@ -75,7 +75,7 @@ UR_GRIPPER_CFG = ArticulationCfg(
             velocity_limit_sim=3.14,
             effort_limit_sim=330.0,
             stiffness=2000.0,
-            damping=100.0,
+            damping=300.0,
         ),
         "elbow": ImplicitActuatorCfg(
             joint_names_expr=[
@@ -84,7 +84,7 @@ UR_GRIPPER_CFG = ArticulationCfg(
             velocity_limit_sim=3.14,
             effort_limit_sim=150.0,
             stiffness=2000.0,
-            damping=100.0,
+            damping=300.0,
         ),
         "wrist": ImplicitActuatorCfg(
             joint_names_expr=[
@@ -95,7 +95,7 @@ UR_GRIPPER_CFG = ArticulationCfg(
             velocity_limit_sim=3.14,
             effort_limit_sim=56.0,
             stiffness=1000.0,
-            damping=100.0,
+            damping=200.0,
         ),
         "gripper": ImplicitActuatorCfg(
             joint_names_expr=[
@@ -111,7 +111,7 @@ UR_GRIPPER_CFG = ArticulationCfg(
             velocity_limit_sim=1.0,
             effort_limit_sim=100.0,
             stiffness=2000.0,
-            damping=200.0,
+            damping=250.0,
         ),
     }
 )

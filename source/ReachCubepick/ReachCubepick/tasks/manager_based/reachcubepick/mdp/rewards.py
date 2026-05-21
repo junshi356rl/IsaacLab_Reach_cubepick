@@ -398,28 +398,96 @@ def native_finger_gap_reward(
     
     return torch.exp(-torch.abs(finger_gap - cube_length) / std_dist) * dist_factor
 
-def position_command_error_tanh(
-        env: ManagerBasedRLEnv, std_dist: float, command_name: str, asset_cfg: SceneEntityCfg, left_finger_cfg, right_finger_cfg
-    ) -> torch.Tensor:
+# def position_command_error_progress(
+#     env: "ManagerBasedRLEnv", 
+#     command_name: str, 
+#     asset_cfg: SceneEntityCfg, 
+#     sensor1_cfg: SceneEntityCfg, 
+#     sensor2_cfg: SceneEntityCfg,
+#     max_track_dist: float = 1.2,
+#     grasp_force_threshold: float = 1.5,
+#     print_freq: int = 1000,
+# ) -> torch.Tensor:
+#     asset: RigidObject = env.scene[asset_cfg.name]
+#     command = env.command_manager.get_command(command_name)
+#     des_pos_w = env.scene.env_origins + command[:, :3]
+#     curr_pos_w = asset.data.root_pos_w[:, :3]
+#     distance = torch.norm(curr_pos_w - des_pos_w, dim=1)
+    
+#     dist_reward = torch.clamp(1.0 - distance / max_track_dist, min=0.0, max=1.0)
+    
+#     s1 = env.scene[sensor1_cfg.name]
+#     s2 = env.scene[sensor2_cfg.name]
+
+#     # Squeeze to (N, 3) and compute magnitude
+#     f1 = torch.norm(s1.data.force_matrix_w.squeeze(dim=(1, 2)), dim=-1)
+#     f2 = torch.norm(s2.data.force_matrix_w.squeeze(dim=(1, 2)), dim=-1)
+
+#     # Bilateral force indicates stable grasp
+#     bilateral_force = torch.minimum(f1, f2)
+#     is_grasping = (bilateral_force > grasp_force_threshold).float()
+    
+#     reward = dist_reward * is_grasping
+    
+#     if env.unwrapped.common_step_counter % print_freq == 0:
+#         print(f"[DEBUG] move_progress | Step {env.unwrapped.common_step_counter} | "
+#               f"dist_mean: {distance.mean().item():.3f}m, "
+#               f"dist_reward: {dist_reward.mean().item():.3f}, "
+#               f"grasp_gate: {is_grasping.mean().item():.3f}, "
+#               f"final_reward: {reward.mean().item():.3f}")
+#     return reward
+
+def position_command_error_progress(
+    env: "ManagerBasedRLEnv", 
+    command_name: str, 
+    asset_cfg: SceneEntityCfg, 
+    sensor1_cfg: SceneEntityCfg, 
+    sensor2_cfg: SceneEntityCfg,
+    max_track_dist: float = 1.2,
+    dist_sigma: float = 0.12, 
+    grasp_force_threshold: float = 1.5,
+    print_freq: int = 1000,
+) -> torch.Tensor:
     asset: RigidObject = env.scene[asset_cfg.name]
     command = env.command_manager.get_command(command_name)
-    des_pos_b = command[:, :3]
-    des_pos_w = env.scene.env_origins + des_pos_b
-    asset_curr_pos_w = asset.data.root_pos_w[:, :3]
-    distance = torch.norm(asset_curr_pos_w - des_pos_w, dim=1)
-    dist_reward = torch.exp(-distance / std_dist)
-    debug_cube_move_state(env, distance, dist_reward, print_freq_stats=1000)
-    print_reward(env, print_freq=1000, metric_name="cube_move_distance", metric_value=distance, reward_name="cube_move_position_tracking_reward", reward_value=dist_reward)
+    des_pos_w = env.scene.env_origins + command[:, :3]
+    curr_pos_w = asset.data.root_pos_w[:, :3]
+    distance = torch.norm(curr_pos_w - des_pos_w, dim=1)
     
-    # Only enable the reward when the grippe is grasping the asset
-    _, _, midpoint_pos_w = get_finger_features(env, left_finger_cfg, right_finger_cfg)
-    grasp_dist = get_target_distance(env, asset_cfg, midpoint_pos_w)
-    grasp_factor = torch.exp(-grasp_dist / std_dist)
+    far_reward = torch.clamp(1.0 - distance / max_track_dist, min=0.0, max=1.0)
+    near_reward = torch.exp(-distance / dist_sigma)
+    dist_reward = far_reward + near_reward
     
-    reward = dist_reward * grasp_factor
-    if env.unwrapped.common_step_counter % 1000 == 0:
-        print(f"[DEBUG] Grasp Dist Mean: {grasp_dist.mean().item():.4f}, Mask Mean: {grasp_factor.mean().item():.2f}")
+    s1 = env.scene[sensor1_cfg.name]
+    s2 = env.scene[sensor2_cfg.name]
+    f1 = torch.norm(s1.data.force_matrix_w.squeeze(dim=(1, 2)), dim=-1)
+    f2 = torch.norm(s2.data.force_matrix_w.squeeze(dim=(1, 2)), dim=-1)
+    bilateral_force = torch.minimum(f1, f2)
+    is_grasping = (bilateral_force > grasp_force_threshold).float()
+    
+    reward = dist_reward * is_grasping
+    
+    if env.unwrapped.common_step_counter % print_freq == 0:
+        print(f"[DEBUG] move_progress | Step {env.unwrapped.common_step_counter} | "
+              f"dist_mean: {distance.mean().item():.3f}m, dist_max: {distance.max().item():.3f}m, dist_std: {distance.std().item():.3f}m, "
+              f"dist_reward: {dist_reward.mean().item():.3f}, "
+              f"grasp_gate: {is_grasping.mean().item():.3f}, "
+              f"final_reward: {reward.mean().item():.3f}")
     return reward
+
+def joint_limit_distance_clamped(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg,
+    margin: float = 0.15
+) -> torch.Tensor:
+    asset = env.scene[asset_cfg.name]
+    limits = asset.data.soft_joint_pos_limits[:, :6] # (N, 6, 2)
+    lower, upper = limits[:, :, 0], limits[:, :, 1]
+    current = asset.data.joint_pos[:, :6]
+    
+    dist_to_lower = torch.clamp(margin - (current - lower), min=0.0)
+    dist_to_upper = torch.clamp(margin - (upper - current), min=0.0)
+    return torch.sum(dist_to_lower**2 + dist_to_upper**2, dim=1)
 
 def asset_vel_to_command(
         env: ManagerBasedRLEnv, command_name: str, asset_cfg: SceneEntityCfg, cube_length: float

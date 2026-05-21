@@ -93,11 +93,12 @@ def asset_to_command_vector(env, target_asset_cfg, command_name):
     command = env.command_manager.get_command(command_name)
     des_pos_b = command[:, :3]
     des_pos_w = env.scene.env_origins + des_pos_b
-    cube_pos_w = env.scene[target_asset_cfg.name].data.root_pos_w
+    cube_pos_w = env.scene[target_asset_cfg.name].data.root_pos_w[:, :3]
     delta = des_pos_w - cube_pos_w
     if env.unwrapped.common_step_counter % 10000 == 0:
             print(f"[DEBUG] asset_to_command_vector | Step {env.unwrapped.common_step_counter} | "
                 f"mean_abs: {delta.abs().mean(dim=1).mean().item():.4f}, "
+                f"norm mean abs: {delta.norm(dim=1).mean().item():.4f}, "
                 f"max_abs: {delta.abs().max(dim=1)[0].max().item():.4f}, "
                 f"std: {delta.std(dim=1).mean().item():.4f}")
 
