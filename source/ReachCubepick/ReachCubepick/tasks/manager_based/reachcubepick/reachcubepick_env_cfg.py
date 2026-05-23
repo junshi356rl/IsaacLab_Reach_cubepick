@@ -254,7 +254,7 @@ class CommandsCfg:
         ranges=mdp.UniformPoseCommandCfg.Ranges(
             pos_x=(0.6, 0.8),
             pos_y=(-0.5, -0.3),
-            pos_z=(CUBE_LENGTH/2, CUBE_LENGTH/2),
+            pos_z=(0.2, 0.3),
             roll=(0.0, 0.0),
             pitch=(0.0, 0.0),
             yaw=(0.0, 0.0),
@@ -376,11 +376,11 @@ class RewardsCfg:
                 }
     )
 
-    # joint_limit_avoidance = RewTerm(
-    #     func=mdp.joint_limit_distance_clamped,
-    #     weight=-0.5, 
-    #     params={"asset_cfg": SceneEntityCfg("robot"), "margin": 0.15}
-    # )
+    joint_limit_avoidance = RewTerm(
+        func=mdp.joint_limit_distance_clamped,
+        weight=-0.5, 
+        params={"asset_cfg": SceneEntityCfg("robot"), "margin": 0.15}
+    )
 
     action_rate = RewTerm(
         func=mdp.action_rate_l2, 

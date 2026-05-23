@@ -478,7 +478,8 @@ def position_command_error_progress(
 def joint_limit_distance_clamped(
     env: ManagerBasedRLEnv,
     asset_cfg: SceneEntityCfg,
-    margin: float = 0.15
+    margin: float = 0.15,
+    print_freq: int = 1000,
 ) -> torch.Tensor:
     asset = env.scene[asset_cfg.name]
     limits = asset.data.soft_joint_pos_limits[:, :6] # (N, 6, 2)
@@ -487,6 +488,19 @@ def joint_limit_distance_clamped(
     
     dist_to_lower = torch.clamp(margin - (current - lower), min=0.0)
     dist_to_upper = torch.clamp(margin - (upper - current), min=0.0)
+
+    env_hit_lower = (dist_to_lower > 0).any(dim=1)
+    env_hit_upper = (dist_to_upper > 0).any(dim=1)
+    env_hit_any   = env_hit_lower | env_hit_upper
+    
+    count_lower = int(env_hit_lower.sum())
+    count_upper = int(env_hit_upper.sum())
+    count_any   = int(env_hit_any.sum())
+    if env.unwrapped.common_step_counter % print_freq == 0:
+        print(f"[JointLimit] Step {env.unwrapped.common_step_counter} | "
+              f"Lower: {count_lower}/{env.scene.num_envs} | "
+              f"Upper: {count_upper}/{env.scene.num_envs} | "
+              f"Any: {count_any}/{env.scene.num_envs}")
     return torch.sum(dist_to_lower**2 + dist_to_upper**2, dim=1)
 
 def asset_vel_to_command(
