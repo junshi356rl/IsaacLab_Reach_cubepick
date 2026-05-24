@@ -14,15 +14,9 @@ def get_finger_axis(
     left_finger_cfg,
     right_finger_cfg,
 ) -> torch.Tensor:
-    """Compute the gripper opening axis (projected to XY).
-
-    Returns a normalized axis per environment (shape: (N, 3)).
-    """
+    """Returns left pad position and the raw opening axis vector (unnormalized)."""
     left_finger_asset = env.scene[left_finger_cfg.name]
     right_finger_asset = env.scene[right_finger_cfg.name]
-
-    left_body_id = left_finger_asset.find_bodies(left_finger_cfg.body_names[0])[0]
-    right_body_id = right_finger_asset.find_bodies(right_finger_cfg.body_names[0])[0]
 
     left_pad_pos_w = get_offset_body_pos_w(left_finger_asset, left_finger_cfg.body_names[0], PAD_OFFSET)
     right_pad_pos_w = get_offset_body_pos_w(right_finger_asset, right_finger_cfg.body_names[0], PAD_OFFSET)
@@ -31,15 +25,12 @@ def get_finger_axis(
 
     return left_pad_pos_w, finger_axis
 
-def get_to_target(env: "ManagerBasedRLEnv",
+def get_finger_to_target(env: "ManagerBasedRLEnv",
     left_finger_cfg,
     right_finger_cfg,
     target_asset_cfg,
 ) -> torch.Tensor:
-    """Compute the direction from the fingers' midpoint to the target (projected to XY).
-
-    Returns a normalized axis per environment (shape: (N, 3)).
-    """
+    """Returns finger midpoint and the raw vector to target (unnormalized)."""
     left_finger_asset = env.scene[left_finger_cfg.name]
     right_finger_asset = env.scene[right_finger_cfg.name]
 
@@ -52,7 +43,7 @@ def get_to_target(env: "ManagerBasedRLEnv",
     to_target = target_pos - mid_point
     return mid_point, to_target
 
-def compute_gripper_midpoint_dot(
+def get_finger_midpoint_target_axis_product(
     env: "ManagerBasedRLEnv",
     left_finger_cfg,
     right_finger_cfg,
@@ -68,7 +59,7 @@ def compute_gripper_midpoint_dot(
     finger_axis_xy[..., 2] = 0.0
     finger_axis_xy = normalize(finger_axis_xy)
 
-    _, to_target = get_to_target(env, left_finger_cfg, right_finger_cfg, target_asset_cfg)
+    _, to_target = get_finger_to_target(env, left_finger_cfg, right_finger_cfg, target_asset_cfg)
     to_target_xy = to_target.clone()
     to_target_xy[..., 2] = 0.0
     to_target_xy = normalize(to_target_xy)
@@ -77,24 +68,13 @@ def compute_gripper_midpoint_dot(
     dot_product = torch.clamp(dot_product, -1.0, 1.0)
     return dot_product
 
-def get_body_position(env, asset_name, body_name):
-    asset = env.scene[asset_name]
-    body_id = asset.find_bodies(body_name)[0]
-    pos = asset.data.body_state_w[:, body_id, :3].squeeze()
-    return pos
 
-def get_body_quat(env, asset_name, body_name):
-    asset = env.scene[asset_name]
-    body_id = asset.find_bodies(body_name)[0]
-    quat = asset.data.body_state_w[:, body_id, 3:7].squeeze()
-    return quat
-
-def compute_cube_velocity_alignment(
+def get_cube_velocity_alignment(
     env: ManagerBasedRLEnv,
     asset_cfg: SceneEntityCfg,
     command_name: str,
     eps: float = 1e-6
-) -> dict:
+):
     asset = env.scene[asset_cfg.name]
     command = env.command_manager.get_command(command_name)
     
@@ -116,7 +96,7 @@ def compute_cube_velocity_alignment(
     
     return (alignment, to_target_dir, vel_dir, cube_speed, cube_vel, to_target_dist)
 
-def wrist_outside_normal_to_target(
+def get_wrist_normal_to_target(
     env: ManagerBasedRLEnv,
     ee_link_cfg: SceneEntityCfg,
     target_asset_cfg: SceneEntityCfg,
@@ -162,6 +142,20 @@ def get_offset_body_pos_w(
 
     return pos_w + quat_apply(quat_w, offset_tensor)
 
+def get_finger_features(
+    env: ManagerBasedRLEnv,
+    left_finger_cfg: SceneEntityCfg,
+    right_finger_cfg: SceneEntityCfg,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    left_asset = env.scene[left_finger_cfg.name]
+    right_asset = env.scene[right_finger_cfg.name]
+
+    left_pos_w = get_offset_body_pos_w(left_asset, left_finger_cfg.body_names[0], PAD_OFFSET)
+    right_pos_w = get_offset_body_pos_w(right_asset, right_finger_cfg.body_names[0], PAD_OFFSET)
+    midpoint_pos_w = (left_pos_w + right_pos_w) / 2.0
+    return left_pos_w, right_pos_w, midpoint_pos_w
+
+
 def get_finger_line_horizontal_info(
     env: "ManagerBasedRLEnv",
     left_finger_cfg: SceneEntityCfg,
@@ -169,9 +163,6 @@ def get_finger_line_horizontal_info(
 ) -> dict:
     left_finger_asset = env.scene[left_finger_cfg.name]
     right_finger_asset = env.scene[right_finger_cfg.name]
-    
-    left_body_id = left_finger_asset.find_bodies(left_finger_cfg.body_names[0])[0]
-    right_body_id = right_finger_asset.find_bodies(right_finger_cfg.body_names[0])[0]
 
     left_pad_pos_w = get_offset_body_pos_w(left_finger_asset, left_finger_cfg.body_names[0], PAD_OFFSET)
     right_pad_pos_w = get_offset_body_pos_w(right_finger_asset, right_finger_cfg.body_names[0], PAD_OFFSET)
@@ -197,15 +188,10 @@ def get_finger_line_horizontal_info(
     }
 
 
-def cube_ee_relative_vel(env, ee_link_name: str) -> torch.Tensor:
+def get_cube_ee_relative_vel(env, ee_link_name: str) -> torch.Tensor:
     """Compute relative velocity between cube and end-effector (cube_vel - ee_vel)."""
     cube_vel = env.scene["cube"].data.root_vel_w[:, :3]
     ee_body_id = env.scene["robot"].find_bodies(ee_link_name)[0]
     ee_vel = env.scene["robot"].data.body_vel_w[:, ee_body_id, :3].squeeze(1)
     rel_vel = cube_vel - ee_vel
-    if env.unwrapped.common_step_counter % 10000 == 0:
-        print(f"[DEBUG] cube_ee_relative_vel | Step {env.unwrapped.common_step_counter} | "
-              f"mean_abs: {rel_vel.abs().mean(dim=1).mean().item():.4f}, "
-              f"max_abs: {rel_vel.abs().max(dim=1)[0].max().item():.4f}, "
-              f"std: {rel_vel.std(dim=1).mean().item():.4f}")
     return rel_vel

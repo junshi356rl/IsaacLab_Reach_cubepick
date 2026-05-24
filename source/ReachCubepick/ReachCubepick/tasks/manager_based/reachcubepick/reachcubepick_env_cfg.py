@@ -3,11 +3,9 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-import math
 import random
 import isaaclab.sim as sim_utils
-import isaaclab.assets
-from isaaclab.assets import ArticulationCfg, AssetBaseCfg, RigidObjectCfg
+from isaaclab.assets import AssetBaseCfg, RigidObjectCfg
 from isaaclab.envs import ManagerBasedRLEnvCfg
 from isaaclab.managers import (
     ActionTermCfg as ActionTerm,
@@ -21,21 +19,16 @@ from isaaclab.managers import (
 )
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.utils import configclass
-from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 from isaaclab.sensors import ContactSensorCfg
-from isaaclab.sim.spawners.from_files.from_files_cfg import GroundPlaneCfg
 from isaaclab.sim.spawners.shapes import CuboidCfg
-from isaaclab.sim.spawners.materials import PhysicsMaterialCfg,RigidBodyMaterialCfg
+from isaaclab.sim.spawners.materials import RigidBodyMaterialCfg
 import torch
 
 from . import mdp
-from .mdp.helper import cube_ee_relative_vel
-from ....helpers.robotiq_fingertip_center_helper import get_left_right_fingertip_gap
+from .mdp.helper import get_cube_ee_relative_vel
 
-from .ur_gripper import UR_GRIPPER_CFG, UR_PATH, BASE_LINK_NAME, EE_LINK_NAME, ROBOT_PRIM_NAME, GRIPPER_PRIM_NAME
+from .ur_gripper import UR_GRIPPER_CFG, BASE_LINK_NAME, EE_LINK_NAME, ROBOT_PRIM_NAME, GRIPPER_PRIM_NAME
 import isaaclab.sim.schemas
-import carb.settings
-from pxr import Usd
 from dataclasses import make_dataclass, field
 from typing import *
 
@@ -48,11 +41,6 @@ def get_random_translation():
 
     return (x, y, z)
 
-def read_meters_per_unit_from_usd(file_path: str) -> float:
-    stage = Usd.Stage.Open(file_path)
-    scale = stage.GetMetadata('metersPerUnit')
-    return scale if scale is not None else 1.0
-
 ##
 # Scene definition
 ##
@@ -62,8 +50,6 @@ CUBE_LENGTH = 0.08
 DIST_TOLERANCE = CUBE_LENGTH/5
 GRASP_TOLERANCE = CUBE_LENGTH/10
 CUBE_MASS = 0.5
-unit_scale = read_meters_per_unit_from_usd(UR_PATH)
-INNER_FINGER_SIZE = [unit_scale*0.0655, 0, 0] # https://blog.robotiq.com/hubfs/support-files/2F-85_2F-140_UR_PDF_20240402.pdf
 MIN_FINGER_GAP = 0.01
 MAX_FINGER_GAP = 0.14
 EPISODE_LENGTH_S = 6.0
@@ -74,11 +60,6 @@ LEFT_FINGER_PRIM_NAME = "left_inner_finger"
 RIGHT_FINGER_PRIM_NAME = "right_inner_finger"
 LEFT_FINGER_PRIM_PATH = "{ENV_REGEX_NS}"+f"/Robot/{ROBOT_PRIM_NAME}/{GRIPPER_PRIM_NAME}/left_inner_finger"
 RIGHT_FINGER_PRIM_PATH = "{ENV_REGEX_NS}"+f"/Robot/{ROBOT_PRIM_NAME}/{GRIPPER_PRIM_NAME}/right_inner_finger"
-
-# LEFT_FINGER_PRIM_NAME = "left_inner_finger_pad"
-# RIGHT_FINGER_PRIM_NAME = "right_inner_finger_pad"
-# LEFT_FINGER_PRIM_PATH = "{ENV_REGEX_NS}"+f"/Robot/{ROBOT_PRIM_NAME}/{GRIPPER_PRIM_NAME}/left_inner_finger/{LEFT_FINGER_PRIM_NAME}"
-# RIGHT_FINGER_PRIM_PATH = "{ENV_REGEX_NS}"+f"/Robot/{ROBOT_PRIM_NAME}/{GRIPPER_PRIM_NAME}/right_inner_finger/{RIGHT_FINGER_PRIM_NAME}"
 
 @configclass
 class ReachcubepickSceneCfg(InteractiveSceneCfg):
@@ -134,86 +115,71 @@ class ObservationsCfg:
         actions = ObsTerm(func=mdp.last_action)
         
         # Cube observations
-        cube_pos = ObsTerm(func=mdp.root_pos_w, params={"asset_cfg": SceneEntityCfg("cube")}) # TODO: should use pos relative to robot base
+        cube_pos = ObsTerm(func=mdp.root_pos_w, params={"asset_cfg": SceneEntityCfg("cube")})
         cube_quat = ObsTerm(func=mdp.root_quat_w, params={"asset_cfg": SceneEntityCfg("cube")})
-        cube_vel = ObsTerm(func=mdp.get_asset_vel, params={"asset_cfg": SceneEntityCfg("cube")})
+        cube_vel = ObsTerm(func=mdp.asset_vel, params={"asset_cfg": SceneEntityCfg("cube")})
         
         ee_pos = ObsTerm(func=mdp.body_pose_w, params={"asset_cfg": SceneEntityCfg("robot", body_names=[EE_LINK_NAME])})
-        ee_vel = ObsTerm(func=mdp.get_body_vel, params={"body_cfg": SceneEntityCfg("robot", body_names=[EE_LINK_NAME])})
+        ee_vel = ObsTerm(func=mdp.body_vel, params={"body_cfg": SceneEntityCfg("robot", body_names=[EE_LINK_NAME])})
         gripper_y_axis_approach = ObsTerm(
-                func=mdp.wrist_outside_normal_to_target_rad,
+                func=mdp.wrist_normal_to_target_rad,
                 params={
                     "ee_link_cfg": SceneEntityCfg("robot", body_names=[EE_LINK_NAME]),
-                    "target_asset_cfg": SceneEntityCfg("cube"),
+                    "target_cfg": SceneEntityCfg("cube"),
                 }
             )
         finger_line_horizontal = ObsTerm(
-            func=mdp.finger_line_horizontal_obs,
+            func=mdp.finger_line_horizontal_rad,
             params={
                 "left_finger_cfg": SceneEntityCfg("robot", body_names=[LEFT_FINGER_PRIM_NAME]),
                 "right_finger_cfg": SceneEntityCfg("robot", body_names=[RIGHT_FINGER_PRIM_NAME]),
             }
         )
-        env_origin = ObsTerm(func=mdp.get_env_origin)
-        finger_gap_native = ObsTerm(func=mdp.inner_finger_gap_minus_cube_length_native, params={
+        env_origin = ObsTerm(func=mdp.env_origin)
+        finger_gap_minus_cube_length = ObsTerm(func=mdp.finger_gap_minus_cube_length, params={
             "left_finger_cfg": SceneEntityCfg("robot", body_names=[LEFT_FINGER_PRIM_NAME]),
             "right_finger_cfg": SceneEntityCfg("robot", body_names=[RIGHT_FINGER_PRIM_NAME]),
             "cube_length": CUBE_LENGTH
         })
-        # cube_fingertip_mid_diff = ObsTerm(func=mdp.fingertip_midpoint_to_target_vector, params={
-        #     "target_asset_cfg": SceneEntityCfg("cube")})
-        # finger_to_cube_vel_native = ObsTerm(func=mdp.inner_finger_midpoint_vel_to_target_native, params={
-        #     "left_finger_cfg": SceneEntityCfg("robot", body_names=[LEFT_FINGER_PRIM_NAME]),
-        #     "right_finger_cfg": SceneEntityCfg("robot", body_names=[RIGHT_FINGER_PRIM_NAME]),
-        #     "target_asset_cfg": SceneEntityCfg("cube")
-        # })
-        each_finger_to_target_native = ObsTerm(func=mdp.each_finger_to_target_native, params={
+        fingers_to_target = ObsTerm(func=mdp.fingers_to_target, params={
             "left_finger_cfg": SceneEntityCfg("robot", body_names=[LEFT_FINGER_PRIM_NAME]),
             "right_finger_cfg": SceneEntityCfg("robot", body_names=[RIGHT_FINGER_PRIM_NAME]),
-            "target_asset_cfg": SceneEntityCfg("cube")
+            "target_cfg": SceneEntityCfg("cube")
         })
-        finger_midpoint_to_target_native = ObsTerm(func=mdp.finger_midpoint_to_target_native, params={
+        finger_midpoint_and_target = ObsTerm(func=mdp.finger_midpoint_and_target, params={
             "left_finger_cfg": SceneEntityCfg("robot", body_names=[LEFT_FINGER_PRIM_NAME]),
             "right_finger_cfg": SceneEntityCfg("robot", body_names=[RIGHT_FINGER_PRIM_NAME]),
-            "target_asset_cfg": SceneEntityCfg("cube")
+            "target_cfg": SceneEntityCfg("cube")
         })
-        finger_quat_native = ObsTerm(func=mdp.finger_quat_native, params={
+        finger_quat = ObsTerm(func=mdp.finger_quat, params={
             "left_finger_cfg": SceneEntityCfg("robot", body_names=[LEFT_FINGER_PRIM_NAME]),
             "right_finger_cfg": SceneEntityCfg("robot", body_names=[RIGHT_FINGER_PRIM_NAME]),
         })
         left_finger_sensor_forces = ObsTerm(
-            func=mdp.contact_sensor_forces,
+            func=mdp.contact_forces,
             params={"sensor_cfg": SceneEntityCfg(name="left_finger_contact_sensor")},
         )
         right_finger_sensor_forces = ObsTerm(
-            func=mdp.contact_sensor_forces,
+            func=mdp.contact_forces,
             params={"sensor_cfg": SceneEntityCfg(name="right_finger_contact_sensor")},
         )
-        # finger_cube_rel_vel = ObsTerm(
-        #     func=mdp.inner_finger_midpoint_vel_to_target_native,
-        #     params={
-        #         "left_finger_cfg": SceneEntityCfg("robot", body_names=[LEFT_FINGER_PRIM_NAME]),
-        #         "right_finger_cfg": SceneEntityCfg("robot", body_names=[RIGHT_FINGER_PRIM_NAME]),
-        #         "target_asset_cfg": SceneEntityCfg("cube")
-        #     }
-        # )
         move_target_command = ObsTerm(func=mdp.generated_commands, params={"command_name": "move_target"})
         cube_to_command = ObsTerm(
-            func=mdp.asset_to_command_vector,
+            func=mdp.asset_to_command_delta,
             params={
-                "target_asset_cfg":SceneEntityCfg("cube"),
+                "target_cfg":SceneEntityCfg("cube"),
                 "command_name":"move_target"
             }
         )
         cube_velocity_alignment = ObsTerm(
-            func=mdp.get_cube_velocity_alignment,
+            func=mdp.cube_velocity_alignment,
             params={
                 "asset_cfg":SceneEntityCfg("cube"),
                 "command_name":"move_target"
             }
         )
         cube_ee_relative_vel = ObsTerm(
-            func=cube_ee_relative_vel,
+            func=get_cube_ee_relative_vel,
             params={"ee_link_name": EE_LINK_NAME}
         )
 
@@ -238,11 +204,6 @@ class ActionsCfg:
         use_default_offset=True,
         debug_vis=True
     )
-    # gripper_action: ActionTerm = mdp.JointEffortActionCfg(
-    #     asset_name="robot",
-    #     joint_names=["finger_joint"],
-    #     debug_vis=True
-    # )
 
 @configclass
 class CommandsCfg:
@@ -264,7 +225,7 @@ class CommandsCfg:
 @configclass
 class RewardsCfg:
     gripper_cube_dist = RewTerm(
-        func=mdp.native_finger_midpoint_to_target_distance_reward,
+        func=mdp.native_finger_midpoint_to_target_reward,
         weight=5.0,
         params={
             'std_dist': STD_DIST,
@@ -340,19 +301,6 @@ class RewardsCfg:
         }
     )
 
-    # Increase it in the CurriculumCfg
-    # cube_command_dist = RewTerm(
-    #     func=mdp.position_command_error_tanh,
-    #     weight=0.0,
-    #     params={
-    #             # "std_dist": STD_DIST_MOVE,
-    #             "std_dist": STD_DIST,
-    #             "asset_cfg": SceneEntityCfg("cube"),
-    #             "command_name": "move_target",
-    #             'left_finger_cfg': SceneEntityCfg("robot", body_names=[LEFT_FINGER_PRIM_NAME]),
-    #             'right_finger_cfg': SceneEntityCfg("robot", body_names=[RIGHT_FINGER_PRIM_NAME]),
-    #             }
-    # )
     cube_command_dist = RewTerm(
         func=mdp.position_command_error_progress,
         weight=0.0,
@@ -393,18 +341,7 @@ class RewardsCfg:
         params={
             "asset_cfg": SceneEntityCfg("robot")}, # exclude mimic joints
     )
-    # anti_slip_penalty = RewTerm(
-    #     func=mdp.finger_slip_penalty,
-    #     params={
-    #         "ee_link_name": EE_LINK_NAME,
-    #         "sensor1_cfg": SceneEntityCfg("left_finger_contact_sensor"),
-    #         "sensor2_cfg": SceneEntityCfg("right_finger_contact_sensor"),
-    #         "slip_vel_threshold": 0.04,
-    #         "grasp_force_threshold": 1.5
-    #     },
-    #     weight=1.5,
-    # )
-    
+
     termination_penalty = RewTerm(
         func=mdp.is_terminated,
         weight=-5.0,
@@ -460,7 +397,6 @@ class TerminationsCfg:
         func=joint_vel_too_high, 
         params={
             "threshold": 10.0,
-            # "asset_cfg": SceneEntityCfg("robot", joint_ids=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
             "asset_cfg": SceneEntityCfg("robot", joint_ids=[0, 1, 2, 3, 4, 5])
         }
     )
@@ -539,10 +475,6 @@ _curriculum_terms = {
         weights=[0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0],
         num_steps=[0, 300000, 500000, 700000, 900000, 1100000, 1500000]
     ),
-    # **build_curriculum_terms("action_rate", 
-    #     weights=[-0.0002, -0.00015, -0.0001, -0.00005],
-    #     num_steps=[0, 300000, 600000, 1000000]
-    # )
 }
 
 CurriculumCfg = create_curriculum_cfg(_curriculum_terms)
