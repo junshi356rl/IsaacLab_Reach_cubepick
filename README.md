@@ -1,8 +1,55 @@
-# Overview
-Built based on the IsaacLab PPO skrl template and instructions in the NVIDIA Deep Learning Institute course "Train Your Second Robot in Isaac Lab", this repo includes the implementation of the Challenge 1: Pick an Object.
+# UR10e Cube Pick & Stabilize (Isaac Lab RL Environment)
 
-## Envrionment
-Follow https://isaac-sim.github.io/IsaacLab/main/source/setup/installation/index.html to install IsaacLab to local environment.
+This repository contains a reinforcement learning environment built on [NVIDIA Isaac Lab](https://github.com/isaac-sim/IsaacLab) for training a UR10e robotic arm with a Robotiq 2F-140 gripper to grasp and transport a cube to a commanded target. 
 
-## Run
-Run scripts under `scripts/skrl` to train skrl agents or load trained agents then play
+**Training Objective:** Learn a control policy that robustly grasps the cube, accurately transports it to a dynamically commanded target, and stably maintains its pose upon arrival.
+
+While the core objective—moving a cube to a target—is inherently **sparse and sequential** (requiring a stable grasp before transportation can begin), this environment employs extensive **reward shaping** to transform the overall signal into a **dense, continuous feedback loop**. This design ensures stable policy learning across the approach, grasp, and transport phases.
+
+## 🛠️ Training Setup & Algorithm
+This project utilizes **Proximal Policy Optimization (PPO)** as the core reinforcement learning algorithm. The environment is built on Isaac Lab's **Manager-Based Workflow**.
+
+## 📈 Training Metrics & Policy Evaluation
+
+The following presents the TensorBoard metrics recorded during training, alongside a demonstration of the trained policy evaluated in simulation using the `play` script (checkpoint loaded at 3,150,000 steps). 
+
+As illustrated, the policy successfully generates diverse, adaptive trajectories to transport the cube to the target across parallel environment instances. It effectively handles randomized initial cube positions (`x: 0.35–0.5, y: 0.3–0.5`) and randomized target commands (`x: 0.6–0.8, y: -0.5–-0.3, z: 0.2–0.3`), demonstrating robust spatial generalization and consistent task completion.
+
+#### Tensorboard metrics
+![Tensorboard snapshot](images/tensorboard.png)
+
+#### Test demo
+![demo](images/demo.gif)
+
+## 🎯 Reward Design
+
+### 🔹 Core Task Rewards
+Three primary functions guide the agent toward the main objective:
+1. **Approach Reward**: Distance from the midpoint between the two gripper fingers to the cube center. Encourages the end-effector to close the gap to the object.
+2. **Contact/Grasp Reward**: Interaction force measured by contact sensors on both fingers. Incentivizes establishing firm bilateral contact with the cube.
+3. **Transport Progress Reward**: Distance from the cube to the commanded target. A **linear + exponential composite function** is used to provide scalable, distance-aware feedback throughout the movement phase.
+
+### Auxiliary Rewards (Mitigating Reward Hacking)
+Early training revealed a reward-hacking behavior where the policy pressed down on the cube from an oblique angle instead of properly grasping it. To enforce stable, side-to-side grasping, the following shaping rewards were introduced:
+- **Finger Closure**: Encourages reducing the finger gap as the gripper approaches the cube.
+- **Horizontal Alignment**: Encourages the fingers to align horizontally and grasp the cube from both sides.
+- **Wrist Orientation**: Encourages aligning the gripper wrist's approach direction toward the cube center.
+
+### Penalties
+- **Joint Limit Penalty**: Applied when joints approach their soft/hard limits, as performance degradation was observed near these boundaries.
+
+## 📚 Curriculum Learning
+The training schedule progressively increases task complexity to stabilize learning:
+- **150k Steps**: Gradually increase the contact/grasp reward weight. The policy learns to securely grasp the cube after initial contact.
+- **200k Steps**: Gradually increase the cube-to-target distance reward. The policy transitions from grasping to active transportation.
+- **Progressive Alignment**: Gradually increase the reward for aligning the cube's velocity vector with the target direction, accelerating convergence during the transport phase.
+
+## ⚙️ Additional Implementation Details
+- **Spatial Transformations**: Finger link centers are computed using spatial transforms for precise geometric grasp rewards.
+- **Actuator Tuning**: Active joint `stiffness`/`damping` and mimic joint `natural frequency`/`damping ratios` are carefully calibrated to balance responsiveness and simulation stability.
+- **Physics Solver**: Solver position/velocity iterations set to `32` for robust contact handling.
+
+## 📋 TODO
+- [ ] Add a stabilization reward to maintain the cube's position after reaching the target.
+- [ ] Increase the randomization range for initial cube and target positions to improve generalization.
+- [ ] Compute and log rollout success rates in the `play` script.
