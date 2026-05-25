@@ -21,6 +21,10 @@ As illustrated, the policy successfully generates diverse, adaptive trajectories
 #### Test demo
 ![demo](images/demo_compressed.gif)
 
+#### Test demo snapshots
+![snapshot0](images/snapshot0.jpg)
+![snapshot](images/snapshot.jpg)
+
 ## 🎯 Reward Design
 
 ### 🔹 Core Task Rewards
