@@ -19,7 +19,7 @@ As illustrated, the policy successfully generates diverse, adaptive trajectories
 ![Tensorboard snapshot](images/tensorboard.png)
 
 #### Test demo
-![demo](images/demo.gif)
+![demo](images/demo_compressed.gif)
 
 ## 🎯 Reward Design
 
