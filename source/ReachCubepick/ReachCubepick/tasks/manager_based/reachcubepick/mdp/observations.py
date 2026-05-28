@@ -102,26 +102,6 @@ def finger_gap_minus_cube_length(
     return torch.norm(left_tip_pos_w - right_tip_pos_w, dim=-1, keepdim=True) - cube_length
 
 
-def fingers_to_target(
-    env: ManagerBasedRLEnv,
-    left_finger_cfg: SceneEntityCfg,
-    right_finger_cfg: SceneEntityCfg,
-    target_cfg: SceneEntityCfg,
-) -> torch.Tensor:
-    """Vectors from each fingertip to the target."""
-    left_asset = env.scene[left_finger_cfg.name]
-    right_asset = env.scene[right_finger_cfg.name]
-    target_asset: RigidObject = env.scene[target_cfg.name]
-
-    left_tip_pos_w = get_offset_body_pos_w(left_asset, left_finger_cfg.body_names[0], PAD_OFFSET)
-    right_tip_pos_w = get_offset_body_pos_w(right_asset, right_finger_cfg.body_names[0], PAD_OFFSET)
-    target_pos_w = target_asset.data.body_state_w[:, 0, :3]
-
-    vec_left = target_pos_w - left_tip_pos_w
-    vec_right = target_pos_w - right_tip_pos_w
-    return torch.cat((vec_left, vec_right), dim=-1)
-
-
 def finger_midpoint_and_target(
     env: ManagerBasedRLEnv,
     left_finger_cfg: SceneEntityCfg,

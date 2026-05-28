@@ -117,7 +117,6 @@ from isaaclab_tasks.utils.hydra import hydra_task_config
 logger = logging.getLogger(__name__)
 
 import ReachCubepick.tasks  # noqa: F401
-from  ReachCubepick.helpers.robotiq_fingertip_center_helper import write_fingertip_offset_to_env
 # config shortcuts
 if args_cli.agent is None:
     algorithm = args_cli.algorithm.lower()
