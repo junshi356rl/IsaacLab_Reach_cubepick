@@ -141,11 +141,6 @@ class ObservationsCfg:
             "right_finger_cfg": SceneEntityCfg("robot", body_names=[RIGHT_FINGER_PRIM_NAME]),
             "cube_length": CUBE_LENGTH
         })
-        fingers_to_target = ObsTerm(func=mdp.fingers_to_target, params={
-            "left_finger_cfg": SceneEntityCfg("robot", body_names=[LEFT_FINGER_PRIM_NAME]),
-            "right_finger_cfg": SceneEntityCfg("robot", body_names=[RIGHT_FINGER_PRIM_NAME]),
-            "target_cfg": SceneEntityCfg("cube")
-        })
         finger_midpoint_and_target = ObsTerm(func=mdp.finger_midpoint_and_target, params={
             "left_finger_cfg": SceneEntityCfg("robot", body_names=[LEFT_FINGER_PRIM_NAME]),
             "right_finger_cfg": SceneEntityCfg("robot", body_names=[RIGHT_FINGER_PRIM_NAME]),
@@ -427,7 +422,7 @@ class EventCfg:
         params={
             "pose_range": {
                 "x": (0.35, 0.5),
-                "y": (0.3, 0.5),
+                "y": (-0.2, 0.5),
                 "z": (CUBE_LENGTH/2 + 0.001, CUBE_LENGTH/2 + 0.001),  # Slightly above the ground to avoid initial penetration
             },
             'velocity_range': {"x": (0.0, 0.0), "y": (0.0, 0.0), "z": (0.0, 0.0)},
@@ -468,12 +463,12 @@ _curriculum_terms = {
         num_steps=[150000, 200000, 250000, 300000, 350000, 400000, 450000, 550000, 650000, 750000]
     ),
     **build_curriculum_terms("cube_command_dist", 
-        weights=[0.0, 1.0, 3.0, 5.0, 7.0, 9.0, 11.0, 13.0, 15.0, 17.0, 19.0, 21.0, 23.0, 25.0],
-        num_steps=[0, 200000, 350000, 500000, 650000, 800000, 1000000, 1200000, 1400000, 1600000, 1800000, 2000000, 2200000, 2400000]
+        weights=[0.0, 1.0, 3.0, 5.0, 7.0, 9.0, 11.0, 13.0, 15.0, 17.0, 19.0, 21.0, 23.0, 25.0, 27.0, 29.0, 31.0, 33.0, 35.0],
+        num_steps=[0, 200000, 350000, 500000, 650000, 800000, 1000000, 1200000, 1400000, 1600000, 1800000, 2000000, 2200000, 2400000, 2600000, 2800000, 3000000, 3200000, 3400000]
     ),
     **build_curriculum_terms("cube_move_towards_command", 
-        weights=[0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0],
-        num_steps=[0, 300000, 500000, 700000, 900000, 1100000, 1500000]
+        weights=[0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0],
+        num_steps=[0, 300000, 500000, 700000, 900000, 1100000, 1500000, 1900000, 2300000, 2700000, 3100000]
     ),
 }
 
@@ -488,7 +483,7 @@ CurriculumCfg = create_curriculum_cfg(_curriculum_terms)
 @configclass
 class ReachcubepickEnvCfg(ManagerBasedRLEnvCfg):
     # Scene settings
-    scene: ReachcubepickSceneCfg = ReachcubepickSceneCfg(num_envs=1000, env_spacing=ENV_SPACING)
+    scene: ReachcubepickSceneCfg = ReachcubepickSceneCfg(num_envs=800, env_spacing=ENV_SPACING)
     observations = ObservationsCfg()
 
     actions = ActionsCfg()
