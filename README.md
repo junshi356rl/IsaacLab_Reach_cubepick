@@ -16,7 +16,10 @@ The following presents the TensorBoard metrics recorded during training, alongsi
 As illustrated, the policy successfully generates diverse, adaptive trajectories to transport the cube to the target across parallel environment instances. It effectively handles randomized initial cube positions (`x: 0.35–0.5, y: -0.2–0.5`) and randomized target commands (`x: 0.6–0.8, y: -0.5–-0.3, z: 0.2–0.3`), demonstrating robust spatial generalization and consistent task completion.
 
 #### Tensorboard metrics
-![Tensorboard snapshot](images/tensorboard.png)
+Reward metrics:
+![Tensorboard snapshot reward](images/tensorboard_reward.png)
+Loss & total reward  metrics:
+![Tensorboard snapshot](images/tensorboard_loss.png)
 
 #### Test demo
 ![demo](images/demo_compressed.gif)
