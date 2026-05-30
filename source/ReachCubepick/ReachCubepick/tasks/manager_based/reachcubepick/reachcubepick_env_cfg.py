@@ -33,11 +33,9 @@ from dataclasses import make_dataclass, field
 from typing import *
 
 def get_random_translation():
-    x = random.uniform(0.3, 0.6)
-    y = random.uniform(0.1, 0.2)
+    x = random.uniform(0.35, 0.5)
+    y = random.uniform(-0.5, 0.5)
     z = CUBE_LENGTH/2 + 0.001  # Slightly above the ground to avoid initial penetration
-    if random.random() < 0.5:
-        y = -y
 
     return (x, y, z)
 
@@ -208,9 +206,9 @@ class CommandsCfg:
         resampling_time_range=(EPISODE_LENGTH_S, EPISODE_LENGTH_S),
         debug_vis=True,
         ranges=mdp.UniformPoseCommandCfg.Ranges(
-            pos_x=(0.6, 0.8),
-            pos_y=(-0.5, -0.3),
-            pos_z=(0.2, 0.3),
+            pos_x=(0.3, 0.5),
+            pos_y=(-0.5, 0.5),
+            pos_z=(0.1, 0.5),
             roll=(0.0, 0.0),
             pitch=(0.0, 0.0),
             yaw=(0.0, 0.0),
@@ -422,7 +420,7 @@ class EventCfg:
         params={
             "pose_range": {
                 "x": (0.35, 0.5),
-                "y": (-0.2, 0.5),
+                "y": (-0.5, 0.5),
                 "z": (CUBE_LENGTH/2 + 0.001, CUBE_LENGTH/2 + 0.001),  # Slightly above the ground to avoid initial penetration
             },
             'velocity_range': {"x": (0.0, 0.0), "y": (0.0, 0.0), "z": (0.0, 0.0)},
