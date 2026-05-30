@@ -11,9 +11,9 @@ This project utilizes **Proximal Policy Optimization (PPO)** as the core reinfor
 
 ## 📈 Training Metrics & Policy Evaluation
 
-The following presents the TensorBoard metrics recorded during training, alongside a demonstration of the trained policy evaluated in simulation using the `play` script (checkpoint loaded at 3,150,000 steps). 
+The following presents the TensorBoard metrics recorded during training, alongside a demonstration of the trained policy evaluated in simulation using the `play` script (checkpoint loaded at 3,500,000 steps). 
 
-As illustrated, the policy successfully generates diverse, adaptive trajectories to transport the cube to the target across parallel environment instances. It effectively handles randomized initial cube positions (`x: 0.35–0.5, y: -0.2–0.5`) and randomized target commands (`x: 0.6–0.8, y: -0.5–-0.3, z: 0.2–0.3`), demonstrating robust spatial generalization and consistent task completion.
+As illustrated, the policy successfully generates diverse, adaptive trajectories to transport the cube to the target across parallel environment instances. It effectively handles randomized initial cube positions (`x: 0.35–0.5, y: -0.5–0.5`) and randomized target commands (`x: 0.3–0.5, y: -0.5–0.5, z: 0.1–0.5`), demonstrating robust spatial generalization and consistent task completion.
 
 #### Tensorboard metrics
 Reward metrics:
@@ -57,6 +57,6 @@ The training schedule progressively increases task complexity to stabilize learn
 - **Physics Solver**: Solver position/velocity iterations set to `32` for robust contact handling.
 
 ## 📋 TODO
-- [ ] Add a stabilization reward to maintain the cube's position after reaching the target.
+- [x] Add a stabilization reward to maintain the cube's position after reaching the target.
 - [ ] Increase the randomization range for initial cube and target positions to improve generalization.
 - [ ] Compute and log rollout success rates in the `play` script.
