@@ -22,6 +22,11 @@ from isaaclab.utils import configclass
 from isaaclab.sensors import ContactSensorCfg
 from isaaclab.sim.spawners.shapes import CuboidCfg
 from isaaclab.sim.spawners.materials import RigidBodyMaterialCfg
+from isaaclab.utils.noise import (
+    AdditiveGaussianNoiseCfg as Gnoise,
+    AdditiveUniformNoiseCfg as Unoise,
+)
+
 import torch
 
 from . import mdp
@@ -102,23 +107,30 @@ class ObservationsCfg:
     @configclass
     class PolicyCfg(ObsGroup):
         # Robot observations
-        joint_pos = ObsTerm(func=mdp.joint_pos_rel)
-        joint_vel = ObsTerm(func=mdp.joint_vel_rel)
-        joint_effort = ObsTerm(func=mdp.joint_effort,
-                               params={
-                                   "asset_cfg": SceneEntityCfg("robot", joint_ids=[6])
-                                   }
-                            )
-        # Action and Command
+        joint_pos = ObsTerm(func=mdp.joint_pos_rel, noise=Gnoise(mean=0.0, std=0.004))
+        joint_vel = ObsTerm(func=mdp.joint_vel_rel, noise=Gnoise(mean=0.0, std=0.04))
+        joint_effort = ObsTerm(
+            func=mdp.joint_effort,
+            params={"asset_cfg": SceneEntityCfg("robot", joint_ids=[6])},
+            noise=Gnoise(mean=0.0, std=0.02)
+        )
         actions = ObsTerm(func=mdp.last_action)
         
         # Cube observations
-        cube_pos = ObsTerm(func=mdp.root_pos_w, params={"asset_cfg": SceneEntityCfg("cube")})
-        cube_quat = ObsTerm(func=mdp.root_quat_w, params={"asset_cfg": SceneEntityCfg("cube")})
-        cube_vel = ObsTerm(func=mdp.asset_vel, params={"asset_cfg": SceneEntityCfg("cube")})
+        cube_pos = ObsTerm(func=mdp.root_pos_w, params={"asset_cfg": SceneEntityCfg("cube")}, noise=Gnoise(mean=0.0, std=0.002))
+        cube_quat = ObsTerm(func=mdp.root_quat_w, params={"asset_cfg": SceneEntityCfg("cube")}, noise=Gnoise(mean=0.0, std=0.008))
+        cube_vel = ObsTerm(func=mdp.asset_vel, params={"asset_cfg": SceneEntityCfg("cube")}, noise=Gnoise(mean=0.0, std=0.02))
         
-        ee_pos = ObsTerm(func=mdp.body_pose_w, params={"asset_cfg": SceneEntityCfg("robot", body_names=[EE_LINK_NAME])})
-        ee_vel = ObsTerm(func=mdp.body_vel, params={"body_cfg": SceneEntityCfg("robot", body_names=[EE_LINK_NAME])})
+        ee_pos = ObsTerm(
+            func=mdp.body_pose_w,
+            params={"asset_cfg": SceneEntityCfg("robot", body_names=[EE_LINK_NAME])},
+            noise=Gnoise(mean=0.0, std=0.0012)
+        )
+        ee_vel = ObsTerm(
+            func=mdp.body_vel,
+            params={"body_cfg": SceneEntityCfg("robot", body_names=[EE_LINK_NAME])},
+            noise=Gnoise(mean=0.0, std=0.02)
+        )
         gripper_y_axis_approach = ObsTerm(
                 func=mdp.wrist_normal_to_target_rad,
                 params={
@@ -151,10 +163,12 @@ class ObservationsCfg:
         left_finger_sensor_forces = ObsTerm(
             func=mdp.contact_forces,
             params={"sensor_cfg": SceneEntityCfg(name="left_finger_contact_sensor")},
+            noise=Gnoise(mean=0.0, std=0.04)
         )
         right_finger_sensor_forces = ObsTerm(
             func=mdp.contact_forces,
             params={"sensor_cfg": SceneEntityCfg(name="right_finger_contact_sensor")},
+            noise=Gnoise(mean=0.0, std=0.04)
         )
         move_target_command = ObsTerm(func=mdp.generated_commands, params={"command_name": "move_target"})
         cube_to_command = ObsTerm(
@@ -461,12 +475,12 @@ _curriculum_terms = {
         num_steps=[150000, 200000, 250000, 300000, 350000, 400000, 450000, 550000, 650000, 750000]
     ),
     **build_curriculum_terms("cube_command_dist", 
-        weights=[0.0, 1.0, 3.0, 5.0, 7.0, 9.0, 11.0, 13.0, 15.0, 17.0, 19.0, 21.0, 23.0, 25.0, 27.0, 29.0, 31.0, 33.0, 35.0],
-        num_steps=[0, 200000, 350000, 500000, 650000, 800000, 1000000, 1200000, 1400000, 1600000, 1800000, 2000000, 2200000, 2400000, 2600000, 2800000, 3000000, 3200000, 3400000]
+        weights=[0.0, 1.0, 3.0, 5.0, 7.0, 9.0, 11.0, 13.0, 15.0, 17.0, 19.0, 21.0, 23.0, 25.0, 27.0, 29.0, 31.0, 33.0, 35.0, 37.0, 39.0],
+        num_steps=[0, 200000, 350000, 500000, 650000, 800000, 1000000, 1200000, 1400000, 1600000, 1800000, 2000000, 2200000, 2400000, 2600000, 2800000, 3000000, 3200000, 3400000, 3600000, 3800000]
     ),
     **build_curriculum_terms("cube_move_towards_command", 
-        weights=[0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0],
-        num_steps=[0, 300000, 500000, 700000, 900000, 1100000, 1500000, 1900000, 2300000, 2700000, 3100000]
+        weights=[0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5],
+        num_steps=[0, 300000, 500000, 700000, 900000, 1100000, 1500000, 1900000, 2300000, 2700000, 3100000, 3500000]
     ),
 }
 
