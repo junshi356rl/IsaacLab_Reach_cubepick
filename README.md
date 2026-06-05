@@ -9,16 +9,23 @@ While the core objective—moving a cube to a target—is inherently **sparse an
 ## 🛠️ Training Setup & Algorithm
 This project utilizes **Proximal Policy Optimization (PPO)** as the core reinforcement learning algorithm. The environment is built on Isaac Lab's **Manager-Based Workflow**.
 
-## 📈 Training Metrics & Policy Evaluation
+To improve policy robustness and bridge the sim-to-real gap, Gaussian noise is injected during training across all observation terms, including joint states, cube poses, end-effector velocities, and finger contact forces.
 
-The following presents the TensorBoard metrics recorded during training, alongside a demonstration of the trained policy evaluated in simulation using the `play` script (checkpoint loaded at 3,500,000 steps). 
+## 📊 Training Metrics & Policy Evaluation
 
-As illustrated, the policy successfully generates diverse, adaptive trajectories to transport the cube to the target across parallel environment instances. It effectively handles randomized initial cube positions (`x: 0.35–0.5, y: -0.5–0.5`) and randomized target commands (`x: 0.3–0.5, y: -0.5–0.5, z: 0.1–0.5`), demonstrating robust spatial generalization and consistent task completion.
+The trained policy achieves a **~97% rollout success rate** during evaluation via the updated `play` script. Success is defined as bringing the cube within **0.08m** (the length of the cube) of the target position. 
+
+> ⚠️ **Note:** Metrics are currently evaluated on the first trajectory of each environment instance. Subsequent tracking upon automatic environment resets is under investigation due to a minor state-synchronization mismatch.
+
+The following presents the TensorBoard metrics recorded across a comprehensive **5,000,000 steps** training run, alongside live simulation demonstrations (checkpoint loaded at 5,000,000 steps).
+
+The policy successfully generates diverse, adaptive trajectories to transport the cube to the target across parallel environment instances. It effectively handles randomized initial cube positions (`x: 0.35–0.5, y: -0.5–0.5`) and randomized target commands (`x: 0.3–0.5, y: -0.5–0.5, z: 0.1–0.5`), demonstrating robust spatial generalization and high-precision task completion.
 
 #### Tensorboard metrics
 Reward metrics:
 ![Tensorboard snapshot reward](images/tensorboard_reward.png)
-Loss & total reward  metrics:
+
+Loss & total reward metrics:
 ![Tensorboard snapshot](images/tensorboard_loss.png)
 
 #### Test demo
@@ -52,11 +59,12 @@ The training schedule progressively increases task complexity to stabilize learn
 - **Progressive Alignment**: Gradually increase the reward for aligning the cube's velocity vector with the target direction, accelerating convergence during the transport phase.
 
 ## ⚙️ Additional Implementation Details
+- **Success Rate Evaluation**: Built-in logic within the `play` script monitors rollout steps, calculating and logging real-time success percentages across inference trials.
 - **Spatial Transformations**: Finger link centers are computed using spatial transforms for precise geometric grasp rewards.
 - **Actuator Tuning**: Active joint `stiffness`/`damping` and mimic joint `natural frequency`/`damping ratios` are carefully calibrated to balance responsiveness and simulation stability.
 - **Physics Solver**: Solver position/velocity iterations set to `32` for robust contact handling.
 
 ## 📋 TODO
 - [x] Add a stabilization reward to maintain the cube's position after reaching the target.
+- [x] Compute and log rollout success rates in the `play` script.
 - [ ] Increase the randomization range for initial cube and target positions to improve generalization.
-- [ ] Compute and log rollout success rates in the `play` script.
