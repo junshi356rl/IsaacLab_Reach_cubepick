@@ -75,6 +75,7 @@ simulation_app = app_launcher.app
 """Rest everything follows."""
 
 import gymnasium as gym
+import numpy as np
 import os
 import random
 import time
@@ -114,6 +115,14 @@ from isaaclab_tasks.utils import get_checkpoint_path
 from isaaclab_tasks.utils.hydra import hydra_task_config
 
 import ReachCubepick.tasks  # noqa: F401
+
+
+def get_cube_to_target_dist(env):
+    env = env.unwrapped
+    command = env.command_manager.get_command("move_target")
+    desired_pos_w = env.scene.env_origins + command[:, :3]
+    cube_pos_w = env.scene["cube"].data.root_pos_w[:, :3]
+    return torch.norm(desired_pos_w - cube_pos_w, dim=-1).cpu().numpy()
 
 # config shortcuts
 if args_cli.agent is None:
@@ -212,6 +221,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
 
     # reset environment
     obs, _ = env.reset()
+    success_count = 0
+    ended_count = 0
 
     timestep = 0
     # simulate environment
@@ -228,8 +239,28 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
             # - single-agent (deterministic) actions
             else:
                 actions = outputs[-1].get("mean_actions", outputs[0])
+            
+            prev_distances = get_cube_to_target_dist(env)
+            cube_pos_w = env.scene["cube"].data.root_pos_w[:, :3]
             # env stepping
-            obs, _, _, _, _ = env.step(actions)
+            obs, _, terminated, truncated, _ = env.step(actions)
+
+        done = np.asarray(terminated.cpu()) | np.asarray(truncated.cpu())
+        done = done.squeeze()
+        prev_distances = np.asarray(prev_distances)
+        if done.any():
+            step_ended = int(done.sum())
+            step_success = int((prev_distances[done] <= 0.08).sum())
+            success_count += step_success
+            ended_count += step_ended
+            total_success_rate = success_count / ended_count
+            print(
+                f"[INFO] step_ended={step_ended}, "
+                f"step_success_rate={step_success/step_ended:.4f}, "
+                f"total_success_rate={total_success_rate:.4f} "
+                f"({success_count}/{ended_count})"
+            )
+
         if args_cli.video:
             timestep += 1
             # exit the play loop after recording one video
